@@ -1,0 +1,38 @@
+# ============================================================
+# 社交媒体舆情分析与热点事件预测系统 - 依赖清单
+# ============================================================
+
+# 数据采集
+requests>=2.28.0
+beautifulsoup4>=4.11.0
+lxml>=4.9.0
+
+# 数据存储
+pymongo>=4.3.0
+redis>=4.5.0
+
+# 数据处理 & NLP
+jieba>=0.42.1
+pandas>=1.5.0
+numpy>=1.23.0
+scikit-learn>=1.2.0
+gensim>=4.3.0
+
+# 深度学习 - TextCNN (PyTorch)
+torch>=2.0.0
+
+# 统计模型 - ARIMA / SIR
+statsmodels>=0.14.0
+scipy>=1.10.0
+
+# Web应用
+flask>=2.3.0
+flask-cors>=4.0.0
+
+# 可视化
+pyecharts>=2.0.0
+matplotlib>=3.7.0
+wordcloud>=1.9.0
+
+# 工具
+tqdm>=4.65.0
