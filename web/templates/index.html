@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>社交媒体舆情分析与热点事件预测系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2.1.0/dist/echarts-wordcloud.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #0a0e27 0%, #1a1f4e 50%, #0a0e27 100%);
+            color: #fff;
+            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+
+        .header {
+            text-align: center;
+            padding: 20px 0;
+            background: linear-gradient(180deg, rgba(0,40,100,0.9) 0%, transparent 100%);
+            border-bottom: 2px solid rgba(0,180,255,0.3);
+            position: relative;
+            backdrop-filter: blur(10px);
+        }
+        .header h1 {
+            font-size: 32px;
+            letter-spacing: 8px;
+            background: linear-gradient(90deg, #00b4ff, #00ff88, #ffd700, #00b4ff);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: shimmer 3s linear infinite;
+            text-shadow: 0 0 40px rgba(0,180,255,0.3);
+        }
+        @keyframes shimmer {
+            0% { background-position: 0% center; }
+            100% { background-position: 200% center; }
+        }
+        .header .subtitle {
+            font-size: 14px;
+            color: rgba(0,180,255,0.7);
+            margin-top: 8px;
+            letter-spacing: 2px;
+        }
+        .header .time-display {
+            position: absolute;
+            right: 30px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 18px;
+            color: #00b4ff;
+            font-family: 'Courier New', monospace;
+            background: rgba(0,180,255,0.1);
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: 1px solid rgba(0,180,255,0.2);
+        }
+
+        .filter-bar {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            padding: 15px 20px;
+            background: rgba(0,40,80,0.5);
+            border-bottom: 1px solid rgba(0,180,255,0.15);
+            flex-wrap: wrap;
+        }
+        .filter-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .filter-item label {
+            font-size: 13px;
+            color: rgba(0,180,255,0.8);
+        }
+        .filter-item input, .filter-item select {
+            padding: 8px 12px;
+            border: 1px solid rgba(0,180,255,0.3);
+            border-radius: 6px;
+            background: rgba(0,30,60,0.8);
+            color: #fff;
+            font-size: 13px;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+        .filter-item input:focus, .filter-item select:focus {
+            border-color: #00b4ff;
+            box-shadow: 0 0 10px rgba(0,180,255,0.3);
+        }
+        .filter-item button {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 6px;
+            background: linear-gradient(90deg, #00b4ff, #0088cc);
+            color: #fff;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .filter-item button:hover {
+            background: linear-gradient(90deg, #0088cc, #0066aa);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(0,180,255,0.3);
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-around;
+            padding: 20px;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .stat-card {
+            flex: 1;
+            min-width: 140px;
+            background: linear-gradient(145deg, rgba(0,50,100,0.8), rgba(0,30,60,0.9));
+            border: 1px solid rgba(0,180,255,0.25);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .stat-card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(0,180,255,0.6);
+            box-shadow: 0 8px 30px rgba(0,180,255,0.2);
+        }
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, #00b4ff, transparent);
+        }
+        .stat-card .label { 
+            font-size: 13px; 
+            color: rgba(255,255,255,0.6); 
+            margin-bottom: 8px;
+        }
+        .stat-card .value {
+            font-size: 36px;
+            font-weight: bold;
+            font-family: 'Arial Black', sans-serif;
+            margin: 5px 0;
+            text-shadow: 0 0 20px rgba(0,180,255,0.5);
+        }
+        .stat-card .value.blue { color: #00b4ff; }
+        .stat-card .value.green { color: #00ff88; }
+        .stat-card .value.red { color: #ff4d4f; }
+        .stat-card .value.yellow { color: #ffd700; }
+        .stat-card .value.purple { color: #9b59b6; }
+
+        .chart-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto auto;
+            gap: 15px;
+            padding: 0 20px 15px;
+        }
+        .chart-box {
+            background: linear-gradient(145deg, rgba(0,40,80,0.6), rgba(0,25,50,0.7));
+            border: 1px solid rgba(0,180,255,0.15);
+            border-radius: 12px;
+            padding: 18px;
+            min-height: 340px;
+            position: relative;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        .chart-box .title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #00b4ff;
+            margin-bottom: 12px;
+            padding-left: 12px;
+            border-left: 4px solid #00b4ff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .chart-box .title .icon {
+            font-size: 18px;
+        }
+        .chart-container { width: 100%; height: 290px; }
+
+        .bottom-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 15px;
+            padding: 0 20px 20px;
+        }
+
+        .alert-list { padding: 5px 0; }
+        .alert-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            font-size: 13px;
+            transition: all 0.3s ease;
+        }
+        .alert-item:hover {
+            transform: translateX(3px);
+        }
+        .alert-item.high {
+            background: linear-gradient(90deg, rgba(255,77,79,0.2), transparent);
+            border-left: 4px solid #ff4d4f;
+        }
+        .alert-item.medium {
+            background: linear-gradient(90deg, rgba(250,173,20,0.2), transparent);
+            border-left: 4px solid #faad14;
+        }
+        .alert-item .badge {
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-right: 10px;
+            white-space: nowrap;
+        }
+        .alert-item.high .badge { background: #ff4d4f; }
+        .alert-item.medium .badge { background: #faad14; }
+
+        .post-list { max-height: 300px; overflow-y: auto; }
+        .post-item {
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 13px;
+            transition: all 0.2s ease;
+        }
+        .post-item:hover {
+            background: rgba(0,180,255,0.05);
+            padding-left: 5px;
+        }
+        .post-item .meta {
+            color: rgba(255,255,255,0.4);
+            font-size: 11px;
+            margin-top: 4px;
+        }
+        .post-item .sentiment-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-right: 6px;
+        }
+        .post-item .sentiment-tag.pos { background: rgba(0,255,136,0.2); color: #00ff88; }
+        .post-item .sentiment-tag.neg { background: rgba(255,77,79,0.2); color: #ff4d4f; }
+        .post-item .topic-tag {
+            background: rgba(0,180,255,0.15);
+            color: #00b4ff;
+        }
+
+        .topic-list { padding: 5px 0; }
+        .topic-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            margin-bottom: 6px;
+            border-radius: 6px;
+            background: rgba(0,180,255,0.05);
+            font-size: 13px;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+        }
+        .topic-item:hover {
+            background: rgba(0,180,255,0.1);
+            border-color: rgba(0,180,255,0.2);
+        }
+        .topic-item .bar {
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(90deg, #00b4ff, #00ff88);
+            margin-top: 6px;
+            transition: width 0.5s ease;
+        }
+        .topic-item .rank {
+            color: #00b4ff;
+            font-weight: bold;
+            margin-right: 8px;
+            width: 20px;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            padding: 5px 0;
+        }
+        .metric-item {
+            text-align: center;
+            padding: 10px;
+            background: rgba(0,180,255,0.08);
+            border-radius: 8px;
+            border: 1px solid rgba(0,180,255,0.15);
+        }
+        .metric-item .label {
+            font-size: 11px;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 5px;
+        }
+        .metric-item .value {
+            font-size: 20px;
+            font-weight: bold;
+            font-family: 'Arial Black', sans-serif;
+        }
+        .metric-item .value.green { color: #00ff88; }
+        .metric-item .value.blue { color: #00b4ff; }
+        .metric-item .value.yellow { color: #ffd700; }
+
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { 
+            background: rgba(0,180,255,0.4); 
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(0,180,255,0.6); }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: rgba(0,180,255,0.6);
+        }
+        .loading::after {
+            content: '';
+            width: 35px; height: 35px;
+            border: 3px solid rgba(0,180,255,0.2);
+            border-top-color: #00b4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 12px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .trend-up { color: #00ff88; }
+        .trend-down { color: #ff4d4f; }
+        .trend-stable { color: #ffd700; }
+
+        @media (max-width: 1200px) {
+            .chart-grid { grid-template-columns: 1fr; }
+            .bottom-row { grid-template-columns: 1fr; }
+            .stats-row { flex-direction: column; }
+            .stat-card { min-width: 100%; }
+            .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>🌐 社交媒体舆情分析与热点事件预测系统</h1>
+        <div class="subtitle">Social Media Sentiment Analysis & Hot Event Prediction System</div>
+        <div class="time-display" id="currentTime"></div>
+    </div>
+
+    <div class="filter-bar">
+        <div class="filter-item">
+            <label>话题:</label>
+            <select id="topicSelect">
+                <option value="all">全部话题</option>
+            </select>
+        </div>
+        <div class="filter-item">
+            <label>开始:</label>
+            <input type="date" id="startDate">
+        </div>
+        <div class="filter-item">
+            <label>结束:</label>
+            <input type="date" id="endDate">
+        </div>
+        <div class="filter-item">
+            <button onclick="applyFilter()">筛选</button>
+        </div>
+        <div class="filter-item">
+            <button onclick="resetFilter()">重置</button>
+        </div>
+    </div>
+
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="label">📊 帖子总量</div>
+            <div class="value blue" id="totalPosts">--</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">💬 评论总量</div>
+            <div class="value green" id="totalComments">--</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">🔥 热门话题</div>
+            <div class="value yellow" id="totalTopics">--</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">😊 正面情感</div>
+            <div class="value green" id="positiveRatio">--%</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">😠 负面情感</div>
+            <div class="value red" id="negativeRatio">--%</div>
+        </div>
+    </div>
+
+    <div class="chart-grid">
+        <div class="chart-box">
+            <div class="title"><span class="icon">🔍</span> 热词云图</div>
+            <div class="chart-container" id="wordCloud"></div>
+        </div>
+        <div class="chart-box">
+            <div class="title"><span class="icon">📈</span> 情感趋势变化</div>
+            <div class="chart-container" id="sentimentTrend"></div>
+        </div>
+        <div class="chart-box">
+            <div class="title"><span class="icon">🦠</span> SIR 传播预测模型</div>
+            <div class="chart-container" id="sirChart"></div>
+        </div>
+        <div class="chart-box">
+            <div class="title"><span class="icon">📊</span> ARIMA 热度预测</div>
+            <div class="chart-container" id="arimaChart"></div>
+        </div>
+    </div>
+
+    <div class="bottom-row">
+        <div class="chart-box">
+            <div class="title"><span class="icon">🏆</span> 话题热度排行</div>
+            <div class="topic-list" id="topicList"></div>
+        </div>
+        <div class="chart-box">
+            <div class="title"><span class="icon">🤖</span> 模型评估指标</div>
+            <div id="modelMetrics">
+                <div class="loading">加载中</div>
+            </div>
+        </div>
+        <div class="chart-box">
+            <div class="title"><span class="icon">⚠️</span> 舆情预警</div>
+            <div class="alert-list" id="alertList">
+                <div class="loading">加载中</div>
+            </div>
+        </div>
+    </div>
+
+<script>
+const API_BASE = '';
+
+let currentFilters = {
+    topic: 'all',
+    startDate: '',
+    endDate: ''
+};
+
+function buildQueryString(params) {
+    const query = [];
+    if (params.topic && params.topic !== 'all') query.push(`topic=${encodeURIComponent(params.topic)}`);
+    if (params.startDate) query.push(`start_date=${params.startDate}`);
+    if (params.endDate) query.push(`end_date=${params.endDate}`);
+    return query.length > 0 ? '?' + query.join('&') : '';
+}
+
+async function fetchJSON(url) {
+    try {
+        const resp = await fetch(API_BASE + url);
+        return await resp.json();
+    } catch (e) {
+        console.error('API请求失败:', url, e);
+        return null;
+    }
+}
+
+function updateTime() {
+    const now = new Date();
+    const str = now.getFullYear() + '-' +
+        String(now.getMonth()+1).padStart(2,'0') + '-' +
+        String(now.getDate()).padStart(2,'0') + ' ' +
+        String(now.getHours()).padStart(2,'0') + ':' +
+        String(now.getMinutes()).padStart(2,'0') + ':' +
+        String(now.getSeconds()).padStart(2,'0');
+    document.getElementById('currentTime').textContent = str;
+}
+setInterval(updateTime, 1000);
+updateTime();
+
+async function loadTopicsList() {
+    const data = await fetchJSON('/api/topics');
+    if (!data) return;
+    const select = document.getElementById('topicSelect');
+    select.innerHTML = '<option value="all">全部话题</option>' +
+        data.map(t => `<option value="${t}">${t}</option>`).join('');
+}
+
+function applyFilter() {
+    currentFilters = {
+        topic: document.getElementById('topicSelect').value,
+        startDate: document.getElementById('startDate').value,
+        endDate: document.getElementById('endDate').value
+    };
+    init();
+}
+
+function resetFilter() {
+    document.getElementById('topicSelect').value = 'all';
+    document.getElementById('startDate').value = '';
+    document.getElementById('endDate').value = '';
+    currentFilters = { topic: 'all', startDate: '', endDate: '' };
+    init();
+}
+
+async function loadOverview() {
+    const query = buildQueryString(currentFilters);
+    const data = await fetchJSON('/api/overview' + query);
+    if (!data) return;
+    document.getElementById('totalPosts').textContent = data.total_posts.toLocaleString();
+    document.getElementById('totalComments').textContent = data.total_comments.toLocaleString();
+    document.getElementById('totalTopics').textContent = data.total_topics;
+    document.getElementById('positiveRatio').textContent = data.positive_ratio + '%';
+    document.getElementById('negativeRatio').textContent = data.negative_ratio + '%';
+}
+
+async function loadWordCloud() {
+    const query = buildQueryString(currentFilters);
+    const data = await fetchJSON('/api/word_freq' + query);
+    if (!data) return;
+
+    const chart = echarts.init(document.getElementById('wordCloud'));
+    chart.setOption({
+        backgroundColor: 'transparent',
+        series: [{
+            type: 'wordCloud',
+            shape: 'circle',
+            left: 'center', top: 'center',
+            width: '95%', height: '95%',
+            sizeRange: [14, 65],
+            rotationRange: [-45, 45],
+            rotationStep: 15,
+            gridSize: 8,
+            drawOutOfBound: false,
+            textStyle: {
+                fontFamily: 'Microsoft YaHei',
+                fontWeight: 'bold',
+                color: function() {
+                    const colors = ['#00b4ff','#00ff88','#ffd700','#ff4d4f','#9b59b6','#13c2c2','#722ed1'];
+                    return colors[Math.floor(Math.random() * colors.length)];
+                }
+            },
+            emphasis: {
+                focus: 'self',
+                textStyle: {
+                    shadowBlur: 10,
+                    shadowColor: 'rgba(0,180,255,0.8)',
+                }
+            },
+            data: data
+        }]
+    });
+    window.addEventListener('resize', () => chart.resize());
+}
+
+async function loadSentimentTrend() {
+    const query = buildQueryString(currentFilters);
+    const data = await fetchJSON('/api/sentiment_trend' + query);
+    if (!data) return;
+
+    const chart = echarts.init(document.getElementById('sentimentTrend'));
+    chart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { 
+            trigger: 'axis',
+            backgroundColor: 'rgba(0,40,80,0.95)',
+            borderColor: 'rgba(0,180,255,0.3)',
+            textStyle: { color: '#fff' }
+        },
+        legend: { 
+            data: ['正面', '负面'], 
+            textStyle: { color: '#aaa' }, 
+            top: 5 
+        },
+        grid: { left: 55, right: 25, top: 45, bottom: 40 },
+        xAxis: {
+            type: 'category',
+            data: data.dates,
+            axisLabel: { color: '#666', rotate: 45, fontSize: 10 },
+            axisLine: { lineStyle: { color: '#333' } },
+            axisTick: { show: false }
+        },
+        yAxis: {
+            type: 'value',
+            axisLabel: { color: '#666' },
+            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }
+        },
+        series: [
+            {
+                name: '正面', type: 'line', smooth: true,
+                data: data.positive,
+                lineStyle: { color: '#00ff88', width: 3 },
+                areaStyle: { 
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: 'rgba(0,255,136,0.4)' },
+                        { offset: 1, color: 'rgba(0,255,136,0.02)' }
+                    ])
+                },
+                itemStyle: { color: '#00ff88' },
+                symbol: 'circle',
+                symbolSize: 4,
+            },
+            {
+                name: '负面', type: 'line', smooth: true,
+                data: data.negative,
+                lineStyle: { color: '#ff4d4f', width: 3 },
+                areaStyle: { 
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: 'rgba(255,77,79,0.4)' },
+                        { offset: 1, color: 'rgba(255,77,79,0.02)' }
+                    ])
+                },
+                itemStyle: { color: '#ff4d4f' },
+                symbol: 'circle',
+                symbolSize: 4,
+            }
+        ]
+    });
+    window.addEventListener('resize', () => chart.resize());
+}
+
+async function loadSIR() {
+    const topic = currentFilters.topic === 'all' ? 'AI人工智能' : currentFilters.topic;
+    const query = buildQueryString({ ...currentFilters, topic });
+    const data = await fetchJSON('/api/sir_prediction' + query);
+    if (!data) return;
+
+    const chart = echarts.init(document.getElementById('sirChart'));
+    const time = data.time.map(t => t.toFixed(1));
+
+    chart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { 
+            trigger: 'axis',
+            backgroundColor: 'rgba(0,40,80,0.95)',
+            borderColor: 'rgba(0,180,255,0.3)',
+            textStyle: { color: '#fff' },
+            formatter: function(params) {
+                let result = `<div style="font-weight:bold;margin-bottom:8px">第 ${params[0].axisValue} 天</div>`;
+                params.forEach(p => {
+                    result += `<div style="display:flex;justify-content:space-between;gap:20px">
+                        <span>${p.marker} ${p.seriesName}</span>
+                        <span style="font-weight:bold">${Math.round(p.value).toLocaleString()}</span>
+                    </div>`;
+                });
+                return result;
+            }
+        },
+        legend: {
+            data: [`S(易感)`, `I(讨论中)`, `R(已恢复)`],
+            textStyle: { color: '#aaa' }, 
+            top: 5 
+        },
+        grid: { left: 65, right: 25, top: 50, bottom: 40 },
+        xAxis: {
+            type: 'category', 
+            data: time,
+            axisLabel: { color: '#666', fontSize: 10 },
+            name: '天数', 
+            nameTextStyle: { color: '#666', padding: [10, 0, 0, 0] },
+            axisLine: { lineStyle: { color: '#333' } },
+            axisTick: { show: false }
+        },
+        yAxis: {
+            type: 'value',
+            axisLabel: { color: '#666', formatter: v => (v/1000).toFixed(0) + 'k' },
+            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }
+        },
+        series: [
+            {
+                name: 'S(易感)', type: 'line', smooth: true,
+                data: data.S.map(v => Math.round(v)),
+                lineStyle: { color: '#00b4ff', width: 2, type: 'dashed' },
+                itemStyle: { color: '#00b4ff' }, 
+                showSymbol: false,
+            },
+            {
+                name: 'I(讨论中)', type: 'line', smooth: true,
+                data: data.I.map(v => Math.round(v)),
+                lineStyle: { color: '#ff4d4f', width: 4 },
+                areaStyle: { 
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: 'rgba(255,77,79,0.3)' },
+                        { offset: 1, color: 'rgba(255,77,79,0.02)' }
+                    ])
+                },
+                itemStyle: { color: '#ff4d4f' }, 
+                showSymbol: false,
+                markPoint: {
+                    data: [{ type: 'max', name: '峰值' }],
+                    label: { 
+                        formatter: '{b}\n{c}', 
+                        color: '#fff',
+                        backgroundColor: 'rgba(255,77,79,0.8)',
+                        borderColor: '#ff4d4f',
+                        padding: [5, 10]
+                    },
+                    itemStyle: { color: '#ff4d4f', borderColor: '#fff', borderWidth: 2 }
+                }
+            },
+            {
+                name: 'R(已恢复)', type: 'line', smooth: true,
+                data: data.R.map(v => Math.round(v)),
+                lineStyle: { color: '#00ff88', width: 2 },
+                itemStyle: { color: '#00ff88' }, 
+                showSymbol: false,
+            }
+        ]
+    });
+    
+    const infoDiv = document.createElement('div');
+    infoDiv.style.cssText = `
+        position: absolute; bottom: 15px; right: 15px;
+        font-size: 12px; color: rgba(255,255,255,0.7);
+        background: rgba(0,40,80,0.8); padding: 8px 12px;
+        border-radius: 6px; border: 1px solid rgba(0,180,255,0.2);
+    `;
+    infoDiv.innerHTML = `
+        <div><span style="color:#ffd700">R₀:</span> ${data.R0}</div>
+        <div><span style="color:#ff4d4f">峰值:</span> 第${Math.round(data.peak_day)}天</div>
+        <div><span style="color:#${data.risk_level === '高' ? 'ff4d4f' : data.risk_level === '中' ? 'ffd700' : '00ff88'}">风险:</span> ${data.risk_level}</div>
+    `;
+    document.getElementById('sirChart').parentElement.appendChild(infoDiv);
+
+    window.addEventListener('resize', () => chart.resize());
+}
+
+async function loadARIMA() {
+    const topic = currentFilters.topic === 'all' ? 'AI人工智能' : currentFilters.topic;
+    const query = buildQueryString({ ...currentFilters, topic });
+    const data = await fetchJSON('/api/arima_prediction' + query);
+    if (!data) return;
+
+    const chart = echarts.init(document.getElementById('arimaChart'));
+    const allDates = [...data.history_dates];
+    const forecastDates = [];
+    if (data.history_dates.length > 0) {
+        const last = new Date(data.history_dates[data.history_dates.length - 1]);
+        for (let i = 1; i <= data.forecast.length; i++) {
+            const d = new Date(last);
+            d.setDate(d.getDate() + i);
+            forecastDates.push(d.toISOString().slice(0, 10));
+        }
+    }
+    allDates.push(...forecastDates);
+
+    const historyLine = new Array(data.history_dates.length).fill(null).map((_, i) => data.history_values[i]);
+    const forecastLine = new Array(data.history_dates.length - 1).fill(null);
+    forecastLine.push(data.history_values[data.history_values.length - 1]);
+    forecastLine.push(...data.forecast);
+
+    const upperLine = new Array(data.history_dates.length - 1).fill(null);
+    upperLine.push(data.history_values[data.history_values.length - 1]);
+    upperLine.push(...data.upper_bound);
+
+    const lowerLine = new Array(data.history_dates.length - 1).fill(null);
+    lowerLine.push(data.history_values[data.history_values.length - 1]);
+    lowerLine.push(...data.lower_bound);
+
+    chart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { 
+            trigger: 'axis',
+            backgroundColor: 'rgba(0,40,80,0.95)',
+            borderColor: 'rgba(0,180,255,0.3)',
+            textStyle: { color: '#fff' }
+        },
+        legend: {
+            data: ['历史数据', '预测值', '95%置信区间'],
+            textStyle: { color: '#aaa' }, 
+            top: 5 
+        },
+        grid: { left: 65, right: 25, top: 50, bottom: 50 },
+        xAxis: {
+            type: 'category', 
+            data: allDates,
+            axisLabel: { color: '#666', rotate: 45, fontSize: 10 },
+            axisLine: { lineStyle: { color: '#333' } },
+            axisTick: { show: false }
+        },
+        yAxis: {
+            type: 'value',
+            axisLabel: { color: '#666' },
+            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }
+        },
+        series: [
+            {
+                name: '历史数据', type: 'line', smooth: true,
+                data: historyLine,
+                lineStyle: { color: '#00b4ff', width: 3 },
+                itemStyle: { color: '#00b4ff' }, 
+                showSymbol: false,
+            },
+            {
+                name: '预测值', type: 'line', smooth: true,
+                data: forecastLine,
+                lineStyle: { color: '#ffd700', width: 3, type: 'dashed' },
+                itemStyle: { color: '#ffd700' },
+                symbol: 'diamond',
+                symbolSize: 8,
+            },
+            {
+                name: '上界', type: 'line', smooth: true,
+                data: upperLine, 
+                lineStyle: { opacity: 0 },
+                areaStyle: { 
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: 'rgba(250,173,20,0.25)' },
+                        { offset: 1, color: 'rgba(250,173,20,0.02)' }
+                    ])
+                },
+                stack: 'confidence', 
+                showSymbol: false
+            },
+            {
+                name: '95%置信区间', type: 'line', smooth: true,
+                data: lowerLine,
+                lineStyle: { opacity: 0 },
+                areaStyle: { 
+                    color: 'rgba(250,173,20,0.05)'
+                },
+                stack: 'confidence', 
+                showSymbol: false
+            }
+        ]
+    });
+
+    const infoDiv = document.createElement('div');
+    infoDiv.style.cssText = `
+        position: absolute; bottom: 15px; right: 15px;
+        font-size: 12px; color: rgba(255,255,255,0.7);
+        background: rgba(0,40,80,0.8); padding: 8px 12px;
+        border-radius: 6px; border: 1px solid rgba(0,180,255,0.2);
+    `;
+    const trendColor = data.trend === '上升' ? '#00ff88' : data.trend === '下降' ? '#ff4d4f' : '#ffd700';
+    infoDiv.innerHTML = `
+        <div><span style="color:${trendColor}">趋势:</span> ${data.trend}</div>
+        <div><span style="color:#ffd700">变化率:</span> ${data.change_rate > 0 ? '+' : ''}${data.change_rate}%</div>
+    `;
+    document.getElementById('arimaChart').parentElement.appendChild(infoDiv);
+
+    window.addEventListener('resize', () => chart.resize());
+}
+
+async function loadTopics() {
+    const query = buildQueryString(currentFilters);
+    const data = await fetchJSON('/api/topic_stats' + query);
+    if (!data) return;
+
+    const container = document.getElementById('topicList');
+    const maxCount = Math.max(...data.map(d => d.count));
+
+    container.innerHTML = data.map((t, i) => `
+        <div class="topic-item">
+            <div style="flex:1">
+                <span class="rank">${i+1}</span>
+                <span>${t.topic}</span>
+                <div class="bar" style="width:${(t.count/maxCount*100).toFixed(0)}%"></div>
+            </div>
+            <div style="text-align:right;margin-left:15px">
+                <div style="color:#00b4ff;font-weight:bold;font-size:14px">${t.count.toLocaleString()}</div>
+                <div style="font-size:11px;color:rgba(255,255,255,0.5)">正面 ${t.positive_ratio}%</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function loadModelMetrics() {
+    const container = document.getElementById('modelMetrics');
+    
+    try {
+        const data = await fetchJSON('/api/model_metrics');
+        if (!data) {
+            container.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.4);padding:20px">无法获取模型指标</div>';
+            return;
+        }
+
+        if (data.error) {
+            container.innerHTML = `<div style="text-align:center;color:#ff4d4f;padding:20px">
+                <div style="font-size:14px;margin-bottom:5px">❌ 模型评估失败</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.5)">${data.message || data.error}</div>
+            </div>`;
+            return;
+        }
+
+        if (!data.accuracy || isNaN(data.accuracy)) {
+            container.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.4);padding:20px">模型评估数据无效</div>';
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="metrics-grid">
+                <div class="metric-item">
+                    <div class="label">准确率</div>
+                    <div class="value green">${(data.accuracy*100).toFixed(1)}%</div>
+                </div>
+                <div class="metric-item">
+                    <div class="label">精确率</div>
+                    <div class="value blue">${(data.precision*100).toFixed(1)}%</div>
+                </div>
+                <div class="metric-item">
+                    <div class="label">召回率</div>
+                    <div class="value blue">${(data.recall*100).toFixed(1)}%</div>
+                </div>
+                <div class="metric-item">
+                    <div class="label">F1值</div>
+                    <div class="value yellow">${(data.f1_score*100).toFixed(1)}%</div>
+                </div>
+                <div class="metric-item">
+                    <div class="label">损失值</div>
+                    <div class="value blue">${data.loss.toFixed(4)}</div>
+                </div>
+            </div>
+            <div style="height:150px;margin-top:10px">
+                <div id="lossChart"></div>
+            </div>
+        `;
+
+        setTimeout(() => {
+            const chart = echarts.init(document.getElementById('lossChart'));
+            const epochs = Array.from({length: data.epochs}, (_, i) => i+1);
+            chart.setOption({
+                backgroundColor: 'transparent',
+                tooltip: { trigger: 'axis', backgroundColor: 'rgba(0,40,80,0.95)', textStyle: { color: '#fff' } },
+                legend: { data: ['训练损失', '验证损失'], textStyle: { color: '#aaa' }, top: 0 },
+                grid: { left: 45, right: 20, top: 30, bottom: 20 },
+                xAxis: { type: 'category', data: epochs, axisLabel: { color: '#666', fontSize: 10 } },
+                yAxis: { type: 'value', axisLabel: { color: '#666', fontSize: 10 } },
+                series: [
+                    { name: '训练损失', type: 'line', data: data.train_loss || [], color: '#00b4ff', smooth: true },
+                    { name: '验证损失', type: 'line', data: data.val_loss || [], color: '#ff4d4f', smooth: true }
+                ]
+            });
+            window.addEventListener('resize', () => chart.resize());
+        }, 100);
+    } catch (e) {
+        console.error('模型评估加载失败:', e);
+        container.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.4);padding:20px">模型训练中...</div>';
+    }
+}
+
+async function loadAlerts() {
+    const query = buildQueryString(currentFilters);
+    const data = await fetchJSON('/api/alerts' + query);
+    const container = document.getElementById('alertList');
+
+    if (!data || data.length === 0) {
+        container.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.4);padding:40px">✅ 当前无预警信息</div>';
+        return;
+    }
+
+    container.innerHTML = data.map(a => `
+        <div class="alert-item ${a.level}">
+            <span class="badge">${a.level === 'high' ? '🔴 高危' : '🟡 中危'}</span>
+            <span>${a.message}</span>
+        </div>
+    `).join('');
+}
+
+async function init() {
+    await loadTopicsList();
+    
+    await Promise.all([
+        loadOverview(),
+        loadWordCloud(),
+        loadSentimentTrend(),
+        loadSIR(),
+        loadARIMA(),
+        loadTopics(),
+        loadAlerts()
+    ]);
+    
+    loadModelMetrics();
+}
+
+init();
+
+setInterval(() => {
+    if (!document.hidden) {
+        loadOverview();
+        loadAlerts();
+    }
+}, 60000);
+</script>
+</body>
+</html>

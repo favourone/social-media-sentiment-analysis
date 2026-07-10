@@ -1,0 +1,45 @@
+# 数据文件
+data/
+!data/stopwords.txt
+
+# 模型文件
+models/saved/
+
+# 缓存文件
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# 环境配置
+.env
+venv/
+.env.local
+
+# IDE配置
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 日志文件
+*.log
+
+# Jupyter Notebook
+*.ipynb
+
+# 临时文件
+*.tmp
+*.bak
+
+# 数据库
+*.db
+
+# 压缩包
+*.zip
+*.tar.gz
+*.rar

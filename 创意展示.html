@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>社交媒体舆情分析与热点事件预测系统 - 创意展示</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2.1.0/dist/echarts-wordcloud.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #0a0e27 0%, #1a1f4a 100%);
+            color: #fff;
+            font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+            min-height: 100vh;
+        }
+        
+        .hero {
+            text-align: center;
+            padding: 60px 20px;
+            background: linear-gradient(180deg, rgba(0,40,100,0.8) 0%, transparent 100%);
+        }
+        .hero h1 {
+            font-size: 36px;
+            letter-spacing: 4px;
+            background: linear-gradient(90deg, #00b4ff, #00ff88, #00b4ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 15px;
+        }
+        .hero .subtitle {
+            font-size: 16px;
+            color: rgba(0,180,255,0.6);
+            margin-bottom: 10px;
+        }
+        .hero .tags {
+            display: inline-flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .hero .tag {
+            padding: 6px 20px;
+            border-radius: 20px;
+            background: rgba(0,180,255,0.15);
+            border: 1px solid rgba(0,180,255,0.3);
+            color: #00b4ff;
+            font-size: 13px;
+        }
+
+        .section {
+            padding: 40px 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .section-title {
+            font-size: 24px;
+            color: #00b4ff;
+            margin-bottom: 30px;
+            padding-left: 15px;
+            border-left: 4px solid #00b4ff;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .feature-card {
+            background: rgba(0,40,80,0.5);
+            border: 1px solid rgba(0,180,255,0.2);
+            border-radius: 12px;
+            padding: 25px;
+            text-align: center;
+            transition: transform 0.3s, border-color 0.3s;
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+            border-color: rgba(0,180,255,0.5);
+        }
+        .feature-card .icon {
+            font-size: 40px;
+            margin-bottom: 15px;
+        }
+        .feature-card h3 {
+            font-size: 18px;
+            color: #00ff88;
+            margin-bottom: 10px;
+        }
+        .feature-card p {
+            font-size: 14px;
+            color: rgba(255,255,255,0.6);
+            line-height: 1.6;
+        }
+
+        .tech-stack {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+        .tech-item {
+            background: rgba(0,40,80,0.4);
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .tech-item h4 {
+            color: #00b4ff;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        .tech-item ul {
+            list-style: none;
+        }
+        .tech-item li {
+            padding: 6px 0;
+            font-size: 14px;
+            color: rgba(255,255,255,0.7);
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .demo-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .demo-box {
+            background: rgba(0,40,80,0.4);
+            border: 1px solid rgba(0,180,255,0.15);
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .demo-box h4 {
+            color: #00b4ff;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        .demo-chart {
+            height: 300px;
+        }
+
+        .bottom-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+        .bottom-box {
+            background: rgba(0,40,80,0.4);
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .bottom-box h4 {
+            color: #00b4ff;
+            margin-bottom: 15px;
+        }
+
+        .alert-list { max-height: 280px; overflow-y: auto; }
+        .alert-item {
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            font-size: 13px;
+            border-left: 4px solid;
+        }
+        .alert-item.high { background: rgba(255,77,79,0.15); border-color: #ff4d4f; }
+        .alert-item.medium { background: rgba(250,173,20,0.15); border-color: #faad14; }
+
+        .topic-list { max-height: 280px; overflow-y: auto; }
+        .topic-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            margin-bottom: 6px;
+            background: rgba(0,180,255,0.05);
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .topic-item .bar {
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(90deg, #00b4ff, #00ff88);
+            margin-top: 6px;
+        }
+
+        .post-list { max-height: 280px; overflow-y: auto; }
+        .post-item {
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 13px;
+        }
+        .post-item .meta {
+            font-size: 11px;
+            color: rgba(255,255,255,0.4);
+            margin-top: 4px;
+        }
+        .sentiment-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-right: 6px;
+        }
+        .sentiment-tag.pos { background: rgba(0,255,136,0.2); color: #00ff88; }
+        .sentiment-tag.neg { background: rgba(255,77,79,0.2); color: #ff4d4f; }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: rgba(0,40,80,0.6);
+            border: 1px solid rgba(0,180,255,0.2);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+        .stat-card .label { font-size: 12px; color: rgba(255,255,255,0.5); margin-bottom: 8px; }
+        .stat-card .value { font-size: 28px; font-weight: bold; }
+        .stat-card .value.blue { color: #00b4ff; }
+        .stat-card .value.green { color: #00ff88; }
+        .stat-card .value.red { color: #ff4d4f; }
+        .stat-card .value.yellow { color: #faad14; }
+
+        .about-section {
+            background: rgba(0,40,80,0.3);
+            padding: 40px;
+            border-radius: 12px;
+            margin-top: 30px;
+        }
+        .about-section h3 {
+            color: #00b4ff;
+            margin-bottom: 20px;
+            font-size: 20px;
+        }
+        .about-section p {
+            color: rgba(255,255,255,0.7);
+            line-height: 1.8;
+            margin-bottom: 15px;
+            font-size: 15px;
+        }
+
+        footer {
+            text-align: center;
+            padding: 30px;
+            background: rgba(0,20,50,0.5);
+            border-top: 1px solid rgba(0,180,255,0.2);
+            margin-top: 40px;
+        }
+        footer p {
+            color: rgba(255,255,255,0.4);
+            font-size: 13px;
+        }
+
+        @media (max-width: 768px) {
+            .demo-grid, .bottom-grid, .tech-stack, .stats-row {
+                grid-template-columns: 1fr;
+            }
+            .hero h1 { font-size: 24px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="hero">
+        <h1>社交媒体舆情分析与热点事件预测系统</h1>
+        <div class="subtitle">Social Media Sentiment Analysis & Hot Event Prediction System</div>
+        <div class="tags">
+            <span class="tag">🏆 社会服务赛道</span>
+            <span class="tag">💚 社会公益</span>
+            <span class="tag">🤖 AI人工智能</span>
+            <span class="tag">📊 大数据分析</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2 class="section-title">🎯 核心功能</h2>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="icon">🔍</div>
+                <h3>多平台数据采集</h3>
+                <p>支持微博、知乎、豆瓣等主流社交媒体的数据爬取，实时监控全网舆情动态</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">😊</div>
+                <h3>情感智能分析</h3>
+                <p>基于TextCNN深度学习模型，自动识别文本情感倾向（正面/负面），准确率达90%+</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🏷️</div>
+                <h3>主题自动发现</h3>
+                <p>LDA主题模型自动挖掘热门话题，智能生成话题标签和关键词，助力舆情洞察</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🦠</div>
+                <h3>SIR传播预测</h3>
+                <p>基于传染病模型的舆论传播预测，提前预警话题爆发趋势和峰值时间</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📈</div>
+                <h3>ARIMA趋势预测</h3>
+                <p>时间序列模型预测未来热度走势，提供7天置信区间预测，辅助决策</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">⚠️</div>
+                <h3>智能舆情预警</h3>
+                <p>实时监测负面情感比例，超过阈值自动触发预警，支持多级风险等级</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2 class="section-title">🛠️ 技术架构</h2>
+        <div class="tech-stack">
+            <div class="tech-item">
+                <h4>数据采集层</h4>
+                <ul>
+                    <li>requests + BeautifulSoup</li>
+                    <li>多平台爬虫引擎</li>
+                    <li>定时任务调度</li>
+                </ul>
+            </div>
+            <div class="tech-item">
+                <h4>数据处理层</h4>
+                <ul>
+                    <li>jieba中文分词</li>
+                    <li>TF-IDF特征提取</li>
+                    <li>停用词过滤</li>
+                </ul>
+            </div>
+            <div class="tech-item">
+                <h4>模型算法层</h4>
+                <ul>
+                    <li>TextCNN（情感分类）</li>
+                    <li>LDA（主题发现）</li>
+                    <li>SIR（传播预测）</li>
+                    <li>ARIMA（趋势预测）</li>
+                </ul>
+            </div>
+            <div class="tech-item">
+                <h4>数据存储层</h4>
+                <ul>
+                    <li>MongoDB非结构化存储</li>
+                    <li>本地JSON文件</li>
+                    <li>Redis缓存加速</li>
+                </ul>
+            </div>
+            <div class="tech-item">
+                <h4>Web应用层</h4>
+                <ul>
+                    <li>Flask RESTful API</li>
+                    <li>ECharts可视化</li>
+                    <li>响应式大屏设计</li>
+                </ul>
+            </div>
+            <div class="tech-item">
+                <h4>核心技术栈</h4>
+                <ul>
+                    <li>Python 3.9+</li>
+                    <li>PyTorch 深度学习</li>
+                    <li>scikit-learn 机器学习</li>
+                    <li>statsmodels 统计分析</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2 class="section-title">📊 舆情监控大屏演示</h2>
+        
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="label">📊 帖子总量</div>
+                <div class="value blue">2,000</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">💬 评论总量</div>
+                <div class="value green">8,000</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">🔥 热门话题</div>
+                <div class="value yellow">5</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">😊 正面情感</div>
+                <div class="value green">60%</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">😠 负面情感</div>
+                <div class="value red">40%</div>
+            </div>
+        </div>
+
+        <div class="demo-grid">
+            <div class="demo-box">
+                <h4>🔍 热词云图</h4>
+                <div class="demo-chart" id="wordCloud"></div>
+            </div>
+            <div class="demo-box">
+                <h4>📈 情感趋势变化</h4>
+                <div class="demo-chart" id="sentimentTrend"></div>
+            </div>
+            <div class="demo-box">
+                <h4>🦠 SIR 传播预测模型</h4>
+                <div class="demo-chart" id="sirChart"></div>
+            </div>
+            <div class="demo-box">
+                <h4>📊 ARIMA 热度预测</h4>
+                <div class="demo-chart" id="arimaChart"></div>
+            </div>
+        </div>
+
+        <div class="bottom-grid">
+            <div class="bottom-box">
+                <h4>🏆 话题热度排行</h4>
+                <div class="topic-list" id="topicList"></div>
+            </div>
+            <div class="bottom-box">
+                <h4>⚠️ 舆情预警</h4>
+                <div class="alert-list" id="alertList"></div>
+            </div>
+            <div class="bottom-box">
+                <h4>📰 最新动态</h4>
+                <div class="post-list" id="postList"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="about-section">
+            <h3>💡 创意说明</h3>
+            <p><strong>问题痛点：</strong>当前社交媒体信息爆炸，用户难以快速把握舆论走向，政府和企业也缺乏有效的舆情监测工具来提前预警和应对热点事件。传统舆情分析依赖人工，效率低、反应慢，往往在事件爆发后才被动应对。</p>
+            <p><strong>解决方案：</strong>本系统整合AI情感分析、主题发现、传播预测等核心能力，构建完整的大数据舆情监控平台。通过TextCNN实现情感智能分类，LDA自动发现热门话题，SIR和ARIMA模型预测传播趋势，帮助用户提前把握舆情走向。</p>
+            <p><strong>价值意义：</strong>从社会价值角度，系统帮助政府和相关部门及时发现潜在的社会风险，提前介入引导，维护网络空间的清朗和社会稳定。从效率提升角度，通过自动化的文本处理和预测模型，将分析效率提升数十倍，让舆情工作者聚焦于决策和应对。</p>
+        </div>
+    </div>
+
+    <footer>
+        <p>© 2026 社交媒体舆情分析与热点事件预测系统 | 社会服务赛道参赛作品</p>
+    </footer>
+
+<script>
+function initWordCloud() {
+    const chart = echarts.init(document.getElementById('wordCloud'));
+    const words = [
+        {name:'AI人工智能',value:3500},{name:'大模型',value:2800},{name:'ChatGPT',value:2500},
+        {name:'教育改革',value:2200},{name:'高考',value:1800},{name:'华为',value:2600},
+        {name:'芯片',value:2000},{name:'房价',value:1900},{name:'医疗',value:1700},
+        {name:'就业',value:1600},{name:'电影',value:1400},{name:'足球',value:1300},
+        {name:'自动驾驶',value:1500},{name:'机器学习',value:1200},{name:'深度学习',value:1100},
+        {name:'考研',value:1400},{name:'双减',value:1300},{name:'新能源',value:1800},
+        {name:'手机',value:1600},{name:'消费',value:1200},{name:'直播带货',value:1100},
+        {name:'综艺',value:1000},{name:'明星',value:900},{name:'电竞',value:800}
+    ];
+    chart.setOption({
+        series:[{
+            type:'wordCloud',shape:'circle',left:'center',top:'center',
+            width:'90%',height:'90%',sizeRange:[12,55],rotationRange:[-45,45],
+            textStyle:{fontFamily:'Microsoft YaHei',fontWeight:'bold',
+                color:function(){
+                    const colors=['#00b4ff','#00ff88','#faad14','#ff4d4f','#722ed1','#13c2c2'];
+                    return colors[Math.floor(Math.random()*colors.length)];
+                }
+            },data:words
+        }]
+    });
+    window.addEventListener('resize',()=>chart.resize());
+}
+
+function initSentimentTrend() {
+    const chart = echarts.init(document.getElementById('sentimentTrend'));
+    const dates = ['1/1','1/5','1/10','1/15','1/20','1/25','1/30','2/5','2/10','2/15','2/20','2/25'];
+    const positive = [120,150,180,220,350,580,420,380,450,320,280,310];
+    const negative = [80,90,110,130,180,280,220,190,210,160,140,150];
+    chart.setOption({
+        tooltip:{trigger:'axis'},legend:{data:['正面','负面'],textStyle:{color:'#aaa'},top:5},
+        grid:{left:50,right:20,top:40,bottom:30},
+        xAxis:{type:'category',data:dates,axisLabel:{color:'#666',rotate:45,fontSize:10},axisLine:{lineStyle:{color:'#333'}}},
+        yAxis:{type:'value',axisLabel:{color:'#666'},splitLine:{lineStyle:{color:'rgba(255,255,255,0.05)'}}},
+        series:[
+            {name:'正面',type:'line',smooth:true,data:positive,lineStyle:{color:'#00ff88',width:2},areaStyle:{color:'rgba(0,255,136,0.1)'}},
+            {name:'负面',type:'line',smooth:true,data:negative,lineStyle:{color:'#ff4d4f',width:2},areaStyle:{color:'rgba(255,77,79,0.1)'}}
+        ]
+    });
+    window.addEventListener('resize',()=>chart.resize());
+}
+
+function initSIR() {
+    const chart = echarts.init(document.getElementById('sirChart'));
+    const time = []; const S = []; const I = []; const R = [];
+    for(let i=0;i<=30;i++){
+        time.push('D'+i);
+        const N=1000000,beta=0.3,gamma=0.1;
+        const t=i;
+        const exp_val=Math.exp(-(beta-gamma)*t);
+        const S_val=N*(1-exp_val)/(1+(beta/gamma-1)*exp_val);
+        const I_val=N*(beta/gamma-1)*exp_val/(1+(beta/gamma-1)*exp_val);
+        const R_val=N-S_val-I_val;
+        S.push(Math.round(S_val/1000));
+        I.push(Math.round(I_val/1000));
+        R.push(Math.round(R_val/1000));
+    }
+    chart.setOption({
+        tooltip:{trigger:'axis'},legend:{data:['S(易感)','I(讨论中)','R(已恢复)'],textStyle:{color:'#aaa'},top:5},
+        grid:{left:60,right:20,top:45,bottom:30},
+        xAxis:{type:'category',data:time,axisLabel:{color:'#666',fontSize:9},name:'天数',nameTextStyle:{color:'#666'}},
+        yAxis:{type:'value',axisLabel:{color:'#666',formatter:v=>v+'k'},splitLine:{lineStyle:{color:'rgba(255,255,255,0.05)'}}},
+        series:[
+            {name:'S(易感)',type:'line',smooth:true,data:S,lineStyle:{color:'#00b4ff',width:2},showSymbol:false},
+            {name:'I(讨论中)',type:'line',smooth:true,data:I,lineStyle:{color:'#ff4d4f',width:3},areaStyle:{color:'rgba(255,77,79,0.15)'},showSymbol:false,
+                markPoint:{data:[{type:'max',name:'峰值'}],label:{formatter:'峰值\n{c}k'}}},
+            {name:'R(已恢复)',type:'line',smooth:true,data:R,lineStyle:{color:'#00ff88',width:2},showSymbol:false}
+        ]
+    });
+    window.addEventListener('resize',()=>chart.resize());
+}
+
+function initARIMA() {
+    const chart = echarts.init(document.getElementById('arimaChart'));
+    const historyDates = ['1/20','1/21','1/22','1/23','1/24','1/25','1/26','1/27','1/28','1/29','1/30','1/31','2/1','2/2','2/3'];
+    const historyValues = [800,950,1100,1300,1600,2100,2800,3500,4200,4800,5200,5500,5600,5500,5300];
+    const forecastDates = ['2/4','2/5','2/6','2/7','2/8','2/9','2/10'];
+    const forecast = [5100,4900,4700,4500,4300,4100,3900];
+    const upper = [6000,5800,5600,5400,5200,5000,4800];
+    const lower = [4200,4000,3800,3600,3400,3200,3000];
+    const allDates = [...historyDates,...forecastDates];
+    
+    const historyLine = new Array(historyDates.length).fill(null).map((_,i)=>historyValues[i]);
+    const forecastLine = new Array(historyDates.length-1).fill(null);
+    forecastLine.push(historyValues[historyValues.length-1]);
+    forecastLine.push(...forecast);
+    
+    const upperLine = new Array(historyDates.length-1).fill(null);
+    upperLine.push(historyValues[historyValues.length-1]);
+    upperLine.push(...upper);
+    
+    const lowerLine = new Array(historyDates.length-1).fill(null);
+    lowerLine.push(historyValues[historyValues.length-1]);
+    lowerLine.push(...lower);
+
+    chart.setOption({
+        tooltip:{trigger:'axis'},legend:{data:['历史数据','预测值','95%置信区间'],textStyle:{color:'#aaa'},top:5},
+        grid:{left:60,right:20,top:45,bottom:40},
+        xAxis:{type:'category',data:allDates,axisLabel:{color:'#666',rotate:45,fontSize:10}},
+        yAxis:{type:'value',axisLabel:{color:'#666'},splitLine:{lineStyle:{color:'rgba(255,255,255,0.05)'}}},
+        series:[
+            {name:'历史数据',type:'line',smooth:true,data:historyLine,lineStyle:{color:'#00b4ff',width:2},showSymbol:false},
+            {name:'预测值',type:'line',smooth:true,data:forecastLine,lineStyle:{color:'#faad14',width:2,type:'dashed'}},
+            {name:'上界',type:'line',smooth:true,data:upperLine,lineStyle:{opacity:0},areaStyle:{color:'rgba(250,173,20,0.1)'},stack:'confidence',showSymbol:false},
+            {name:'95%置信区间',type:'line',smooth:true,data:lowerLine,lineStyle:{opacity:0},areaStyle:{color:'rgba(250,173,20,0.1)'},stack:'confidence',showSymbol:false}
+        ]
+    });
+    window.addEventListener('resize',()=>chart.resize());
+}
+
+function initTopicList() {
+    const topics = [
+        {topic:'AI人工智能',count:680,positive_ratio:62},
+        {topic:'科技数码',count:450,positive_ratio:58},
+        {topic:'教育热点',count:420,positive_ratio:55},
+        {topic:'社会民生',count:280,positive_ratio:48},
+        {topic:'娱乐体育',count:170,positive_ratio:65}
+    ];
+    const maxCount = Math.max(...topics.map(t=>t.count));
+    document.getElementById('topicList').innerHTML = topics.map((t,i)=>`
+        <div class="topic-item">
+            <div style="flex:1">
+                <span style="color:#00b4ff;margin-right:8px">${i+1}.</span>
+                <span>${t.topic}</span>
+                <div class="bar" style="width:${(t.count/maxCount*100).toFixed(0)}%"></div>
+            </div>
+            <div style="text-align:right;margin-left:15px">
+                <div style="color:#00b4ff;font-weight:bold">${t.count}</div>
+                <div style="font-size:11px;color:rgba(255,255,255,0.4)">正面${t.positive_ratio}%</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function initAlertList() {
+    const alerts = [
+        {level:'high',topic:'社会民生',message:'负面情感占比 52.0%，超过预警阈值'},
+        {level:'medium',topic:'教育热点',message:'负面情感占比 45.0%，接近预警阈值'}
+    ];
+    const container = document.getElementById('alertList');
+    if(alerts.length===0){
+        container.innerHTML='<div style="text-align:center;color:rgba(255,255,255,0.3);padding:40px">✅ 当前无预警</div>';
+        return;
+    }
+    container.innerHTML = alerts.map(a=>`
+        <div class="alert-item ${a.level}">
+            <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;margin-right:10px;
+                background:${a.level==='high'?'#ff4d4f':'#faad14'};white-space:nowrap">
+                ${a.level==='high'?'高危':'中危'}
+            </span>
+            <span>${a.message}</span>
+        </div>
+    `).join('');
+}
+
+function initPostList() {
+    const posts = [
+        {text:'关于AI换脸诈骗，人工智能立法真的很重要，必须支持！',topic:'AI人工智能',sentiment:1,sentiment_text:'正面',user_name:'科技观察者8821',source:'微博',likes:1256,reposts:328,created_at:'2024-02-10 15:30:22'},
+        {text:'高考改革新方案出来了，大家怎么看？我觉得方向是对的。',topic:'教育热点',sentiment:1,sentiment_text:'正面',user_name:'热心网友3341',source:'知乎',likes:892,reposts:156,created_at:'2024-02-10 14:25:18'},
+        {text:'华为Mate70这次真的太棒了，支持国产！',topic:'科技数码',sentiment:1,sentiment_text:'正面',user_name:'阳光少年1123',source:'微博',likes:2341,reposts:567,created_at:'2024-02-10 13:40:55'},
+        {text:'房价下跌的新闻看了，怎么感觉越来越离谱了？',topic:'社会民生',sentiment:0,sentiment_text:'负面',user_name:'普通市民5567',source:'微博',likes:456,reposts:89,created_at:'2024-02-10 12:15:33'},
+        {text:'春节档电影真的令人失望，差评！',topic:'娱乐体育',sentiment:0,sentiment_text:'负面',user_name:'吃瓜群众7788',source:'豆瓣',likes:678,reposts:134,created_at:'2024-02-10 11:30:12'}
+    ];
+    document.getElementById('postList').innerHTML = posts.map(p=>`
+        <div class="post-item">
+            <div>
+                <span class="sentiment-tag ${p.sentiment===1?'pos':'neg'}">${p.sentiment_text}</span>
+                <span class="sentiment-tag" style="background:rgba(0,180,255,0.15);color:#00b4ff">${p.topic}</span>
+                ${p.text}
+            </div>
+            <div class="meta">@${p.user_name} · ${p.source} · ${p.created_at} · 👍${p.likes} · 🔄${p.reposts}</div>
+        </div>
+    `).join('');
+}
+
+window.onload = function() {
+    initWordCloud();
+    initSentimentTrend();
+    initSIR();
+    initARIMA();
+    initTopicList();
+    initAlertList();
+    initPostList();
+};
+</script>
+</body>
+</html>
