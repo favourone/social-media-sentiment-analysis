@@ -1,0 +1,53 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-.env}
+    environment:
+      TASK_QUEUE_MODE: rq
+      REDIS_URL: redis://redis:6379/0
+      RUNTIME_DIR: /app/runtime
+      PRODUCT_DB_PATH: /app/runtime/sentiment.db
+      REPORT_DIR: /app/runtime/reports
+      IMPORT_DIR: /app/runtime/imports
+    ports:
+      - "${WEB_PORT:-5000}:5000"
+    volumes:
+      - app-runtime:/app/runtime
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    env_file: ${ENV_FILE:-.env}
+    environment:
+      TASK_QUEUE_MODE: rq
+      REDIS_URL: redis://redis:6379/0
+      RUNTIME_DIR: /app/runtime
+      PRODUCT_DB_PATH: /app/runtime/sentiment.db
+      REPORT_DIR: /app/runtime/reports
+      IMPORT_DIR: /app/runtime/imports
+    volumes:
+      - app-runtime:/app/runtime
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  app-runtime:
+  redis-data:

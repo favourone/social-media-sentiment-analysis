@@ -1,6 +1,8 @@
 # 数据文件
 data/
 !data/stopwords.txt
+runtime/
+external/
 
 # 模型文件
 models/saved/
@@ -10,11 +12,15 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
 
 # 环境配置
 .env
 venv/
 .env.local
+.env.*.local
 
 # IDE配置
 .vscode/
@@ -38,6 +44,8 @@ Thumbs.db
 
 # 数据库
 *.db
+*.db-shm
+*.db-wal
 
 # 压缩包
 *.zip
