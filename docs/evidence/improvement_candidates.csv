@@ -1,0 +1,8 @@
+title,action_type,impact,judge_relevance,urgency,feasibility,confidence,learning_value,effort,risk
+修复API筛选与预测数据可信度,high-confidence implementation,5,5,5,5,5,4,3,2
+重构模型评估以消除数据泄漏和请求时训练,high-confidence implementation,5,5,4,4,5,5,4,3
+补充数据来源标识与可复现实验记录,high-confidence implementation,5,5,5,5,5,4,2,1
+强化默认部署安全和依赖降级,high-confidence implementation,4,4,4,5,4,3,2,2
+扩展真实社交媒体采集与用户研究,uncertain experiment,5,5,3,2,2,5,5,5
+仅优化大屏视觉和动效,presentation only,2,3,2,4,2,2,3,2
+保持现状,no change,1,1,1,5,1,1,1,1

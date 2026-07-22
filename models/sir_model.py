@@ -58,6 +58,8 @@ class SIRModel:
         self.gamma = gamma or config.SIR_GAMMA  # 恢复率
         self.R0 = self.beta / self.gamma         # 基本再生数
         self.fitted = False
+        self.initial_infected = None
+        self.fit_nrmse = None
 
     def _sir_equations(self, y, t):
         """
@@ -88,7 +90,16 @@ class SIRModel:
         返回：
             dict: {time, S, I, R, peak_day, peak_value, R0}
         """
-        days = days or config.SIR_TIME_SPAN
+        if not HAS_SCIPY:
+            raise RuntimeError('SciPy 未安装，无法运行 SIR 模拟')
+        days = config.SIR_TIME_SPAN if days is None else int(days)
+        if days < 1:
+            raise ValueError('days 必须大于等于 1')
+        I0 = float(I0)
+        if not np.isfinite(I0) or I0 <= 0:
+            raise ValueError('初始讨论量必须是正数')
+        if I0 >= self.total_users:
+            raise ValueError('初始讨论量必须小于总情景规模')
 
         # 初始条件
         S0 = self.total_users - I0
@@ -96,7 +107,7 @@ class SIRModel:
         y0 = [S0, I0, R0_init]
 
         # 时间点
-        t = np.linspace(0, days, days * 10)  # 每天10个采样点
+        t = np.linspace(0, days, days * 10 + 1)  # 每天10个采样点，包含终点
 
         # 求解微分方程（四阶 Runge-Kutta）
         solution = odeint(self._sir_equations, y0, t)
@@ -130,21 +141,23 @@ class SIRModel:
           min_{β,γ} Σ (I_observed(t) - I_model(t))²
         """
         if not HAS_SCIPY:
-            print("⚠️  scipy 未安装，使用默认参数")
-            return self.simulate(observed_data[0] if observed_data else 100)
-
+            raise RuntimeError('SciPy 未安装，无法拟合 SIR 模型')
         observed = np.array(observed_data, dtype=float)
+        if observed.ndim != 1 or len(observed) < 3:
+            raise ValueError('至少需要 3 个一维观测点')
+        if not np.all(np.isfinite(observed)) or np.any(observed < 0):
+            raise ValueError('观测数据必须是有限的非负数')
         days = len(observed)
         I0 = max(observed[0], 1)
+        self.initial_infected = float(I0)
+        observed_scale = max(float(np.max(observed)), 1.0)
+        observed_normalized = observed / observed_scale
 
         def loss(params):
             beta, gamma = params
-            if beta <= 0 or gamma <= 0 or beta > 2 or gamma > 2:
-                return 1e10
-
             S0 = self.total_users - I0
             y0 = [S0, I0, 0]
-            t = np.linspace(0, days, days)
+            t = np.arange(days, dtype=float)
 
             try:
                 solution = odeint(
@@ -154,29 +167,41 @@ class SIRModel:
                     y0, t
                 )
                 I_pred = solution[:, 1]
-                # 归一化后比较
-                if np.max(I_pred) > 0:
-                    I_pred_normalized = I_pred / np.max(I_pred) * np.max(observed)
-                else:
+                predicted_scale = float(np.max(I_pred))
+                if predicted_scale <= 0 or not np.all(np.isfinite(I_pred)):
                     return 1e10
-                mse = np.mean((I_pred_normalized - observed) ** 2)
+                I_pred_normalized = I_pred / predicted_scale
+                mse = np.mean((I_pred_normalized - observed_normalized) ** 2)
                 return mse
             except Exception:
                 return 1e10
 
-        # 优化
-        result = minimize(loss, [self.beta, self.gamma],
-                          method='Nelder-Mead',
-                          options={'maxiter': 1000})
+        # 对归一化曲线形状做有界拟合。讨论量不是人群规模，因此这里只能解释为情景参数。
+        candidates = []
+        for start in ([self.beta, self.gamma], [0.15, 0.10], [0.50, 0.25]):
+            result = minimize(
+                loss,
+                start,
+                method='L-BFGS-B',
+                bounds=[(0.01, 1.5), (0.01, 1.5)],
+                options={'maxiter': 1000},
+            )
+            if result.success and np.isfinite(result.fun):
+                candidates.append(result)
+        if not candidates:
+            raise RuntimeError('参数优化未收敛')
+        result = min(candidates, key=lambda item: item.fun)
 
         self.beta, self.gamma = result.x
         self.R0 = self.beta / self.gamma
+        self.fit_nrmse = float(np.sqrt(result.fun))
         self.fitted = True
 
         print(f"   ✅ SIR 模型拟合完成")
         print(f"      β(传播率) = {self.beta:.4f}")
         print(f"      γ(恢复率) = {self.gamma:.4f}")
         print(f"      R₀(基本再生数) = {self.R0:.2f}")
+        print(f"      归一化RMSE = {self.fit_nrmse:.4f}")
 
         if self.R0 > 1:
             print(f"      📈 R₀ > 1，话题将爆发传播")
@@ -194,11 +219,8 @@ class SIRModel:
         返回：
             预测结果字典
         """
-        days = days or config.SIR_TIME_SPAN
-        if not self.fitted:
-            I0 = max(int(self.total_users * 0.001), 100)
-        else:
-            I0 = max(int(self.total_users * 0.01), 100)
+        days = config.SIR_TIME_SPAN if days is None else days
+        I0 = self.initial_infected if self.fitted else max(int(self.total_users * 0.001), 100)
         return self.simulate(I0, days)
 
     def get_status(self, current_day, observed_data):

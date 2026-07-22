@@ -8,6 +8,7 @@ Flask Web 应用
 
 import os
 import sys
+from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -16,7 +17,76 @@ from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
+if hasattr(app, 'json'):
+    app.json.ensure_ascii = False
+else:
+    app.config['JSON_AS_ASCII'] = False
+if config.CORS_ORIGINS:
+    CORS(app, resources={r"/api/*": {"origins": config.CORS_ORIGINS}})
+
+
+def api_error(code, message, status, **details):
+    """Return a consistent, machine-readable API error."""
+    payload = {'error': code, 'message': message}
+    if details:
+        payload['details'] = details
+    return jsonify(payload), status
+
+
+def parse_iso_date(name):
+    """Validate an optional ISO date query argument."""
+    raw = request.args.get(name)
+    if not raw:
+        return None, None
+    try:
+        parsed = date.fromisoformat(raw)
+    except ValueError:
+        return None, api_error(
+            'invalid_date', f'{name} 必须是 YYYY-MM-DD 格式', 400, parameter=name
+        )
+    return parsed.isoformat(), None
+
+
+def parse_filters():
+    """Parse and validate the shared date/topic filters."""
+    start_date, error = parse_iso_date('start_date')
+    if error:
+        return None, error
+    end_date, error = parse_iso_date('end_date')
+    if error:
+        return None, error
+    if start_date and end_date and start_date > end_date:
+        return None, api_error(
+            'invalid_date_range', 'start_date 不能晚于 end_date', 400
+        )
+    return {
+        'start_date': start_date,
+        'end_date': end_date,
+        'topic': request.args.get('topic', 'all').strip() or 'all',
+    }, None
+
+
+def parse_bounded_int(name, default, minimum, maximum):
+    """Parse an integer query argument with explicit resource bounds."""
+    raw = request.args.get(name)
+    if raw is None:
+        return default, None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None, api_error(
+            'invalid_parameter', f'{name} 必须是整数', 400, parameter=name
+        )
+    if value < minimum or value > maximum:
+        return None, api_error(
+            'parameter_out_of_range',
+            f'{name} 必须在 {minimum} 到 {maximum} 之间',
+            400,
+            parameter=name,
+            minimum=minimum,
+            maximum=maximum,
+        )
+    return value, None
 
 
 def filter_posts(posts, start_date=None, end_date=None, topic=None):
@@ -26,6 +96,8 @@ def filter_posts(posts, start_date=None, end_date=None, topic=None):
         date = p.get('created_at', '')[:10]
         p_topic = p.get('topic', '')
 
+        if (start_date or end_date) and not date:
+            continue
         if start_date and date and date < start_date:
             continue
         if end_date and date and date > end_date:
@@ -44,6 +116,8 @@ def filter_time_series(series, start_date=None, end_date=None, topic=None):
         date = s.get('date', '')[:10]
         s_topic = s.get('topic', '')
 
+        if (start_date or end_date) and not date:
+            continue
         if start_date and date and date < start_date:
             continue
         if end_date and date and date > end_date:
@@ -52,6 +126,23 @@ def filter_time_series(series, start_date=None, end_date=None, topic=None):
             continue
 
         filtered.append(s)
+    return filtered
+
+
+def filter_comments(comments, allowed_post_ids, start_date=None, end_date=None):
+    """Filter comments by their parent posts and the comment timestamp."""
+    filtered = []
+    for comment in comments:
+        if comment.get('post_id') not in allowed_post_ids:
+            continue
+        comment_date = comment.get('created_at', '')[:10]
+        if (start_date or end_date) and not comment_date:
+            continue
+        if start_date and comment_date and comment_date < start_date:
+            continue
+        if end_date and comment_date and comment_date > end_date:
+            continue
+        filtered.append(comment)
     return filtered
 
 
@@ -68,23 +159,28 @@ def api_overview():
     参数：start_date, end_date, topic
     返回：帖子总数、评论总数、话题数、情感分布
     """
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    topic = request.args.get('topic', 'all')
+    filters, error = parse_filters()
+    if error:
+        return error
+    start_date = filters['start_date']
+    end_date = filters['end_date']
+    topic = filters['topic']
 
     from storage.mongo_client import get_db
     db = get_db()
     posts = db.get_all_posts(limit=200000)
-    comments = db._load_from_json('comments.json')
+    comments = db.get_all_comments()
 
     posts = filter_posts(posts, start_date, end_date, topic)
+    allowed_post_ids = {post.get('post_id') for post in posts}
+    comments = filter_comments(comments, allowed_post_ids, start_date, end_date)
 
     total_posts = len(posts)
     total_comments = len(comments)
     positive = sum(1 for p in posts if p.get('sentiment') == 1)
     negative = total_posts - positive
 
-    topics = set(p.get('topic', '') for p in posts)
+    topics = {p.get('topic') for p in posts if p.get('topic')}
 
     platforms = {}
     for p in posts:
@@ -107,14 +203,17 @@ def api_overview():
 @app.route('/api/topic_stats')
 def api_topic_stats():
     """获取各话题统计数据"""
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
+    filters, error = parse_filters()
+    if error:
+        return error
+    start_date = filters['start_date']
+    end_date = filters['end_date']
 
     from storage.mongo_client import get_db
     db = get_db()
     posts = db.get_all_posts(limit=200000)
 
-    posts = filter_posts(posts, start_date, end_date)
+    posts = filter_posts(posts, start_date, end_date, filters['topic'])
 
     stats = {}
     for p in posts:
@@ -140,9 +239,12 @@ def api_topic_stats():
 @app.route('/api/sentiment_trend')
 def api_sentiment_trend():
     """获取情感趋势数据"""
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    topic = request.args.get('topic', 'all')
+    filters, error = parse_filters()
+    if error:
+        return error
+    start_date = filters['start_date']
+    end_date = filters['end_date']
+    topic = filters['topic']
 
     from storage.mongo_client import get_db
     db = get_db()
@@ -174,9 +276,12 @@ def api_sentiment_trend():
 @app.route('/api/word_freq')
 def api_word_freq():
     """获取词频数据（用于词云）"""
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    topic = request.args.get('topic', 'all')
+    filters, error = parse_filters()
+    if error:
+        return error
+    start_date = filters['start_date']
+    end_date = filters['end_date']
+    topic = filters['topic']
 
     from storage.mongo_client import get_db
     from processing.text_processor import TextProcessor
@@ -198,32 +303,49 @@ def api_sir_prediction():
     SIR 传播预测
     参数：topic（可选）、days（预测天数）、start_date、end_date
     """
-    topic = request.args.get('topic', 'AI人工智能')
-    days = int(request.args.get('days', 30))
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
+    filters, error = parse_filters()
+    if error:
+        return error
+    topic = filters['topic'] if filters['topic'] != 'all' else 'AI人工智能'
+    days, error = parse_bounded_int('days', 30, 1, 90)
+    if error:
+        return error
+    start_date = filters['start_date']
+    end_date = filters['end_date']
 
     from storage.mongo_client import get_db
     from models.sir_model import SIRModel
     db = get_db()
 
-    series_data = db._load_from_json('time_series.json', topic=topic)
-    if not series_data:
-        series_data = db._load_from_json('time_series.json')
-
+    series_data = db.get_time_series(topic=topic)
     series_data = filter_time_series(series_data, start_date, end_date, topic)
 
     values = [d['value'] for d in series_data if d.get('topic') == topic]
-    if not values:
-        values = [100, 150, 200, 500, 2000, 8000, 15000, 12000, 8000, 5000,
-                  3000, 2000, 1500, 1200, 1000, 800, 700, 600, 500, 450]
+    if len(values) < 6:
+        return api_error(
+            'insufficient_data',
+            '当前话题和时间范围至少需要 6 个观测点才能运行 SIR 情景模拟',
+            422,
+            topic=topic,
+            available_points=len(values),
+            required_points=6,
+        )
 
     sir = SIRModel()
-    sir.fit(values[:30])
-    forecast = sir.predict(days=days)
+    try:
+        sir.fit(values[:30])
+        forecast = sir.predict(days=days)
+        status = sir.get_status(len(values), values)
+    except Exception:
+        app.logger.exception('SIR fit failed for topic %s', topic)
+        return api_error('model_fit_failed', 'SIR 模型无法在当前数据上稳定拟合', 422, topic=topic)
 
     return jsonify({
         'topic': topic,
+        'interpretation': 'scenario_simulation',
+        'claim_scope': '基于本地讨论量形状的情景模拟，不代表真实用户规模或因果预测',
+        'observed_points': len(values),
+        'data_provenance': db.get_data_metadata(),
         'time': forecast['time'],
         'S': forecast['S'],
         'I': forecast['I'],
@@ -231,8 +353,9 @@ def api_sir_prediction():
         'peak_day': forecast['peak_day'],
         'peak_value': forecast['peak_value'],
         'R0': forecast['R0'],
-        'phase': sir.get_status(len(values), values)['phase'],
-        'risk_level': sir.get_status(len(values), values)['risk_level'],
+        'phase': status['phase'],
+        'risk_level': status['risk_level'],
+        'fit_nrmse': getattr(sir, 'fit_nrmse', None),
     })
 
 
@@ -242,29 +365,41 @@ def api_arima_prediction():
     ARIMA 时间序列预测
     参数：topic（可选）、steps（预测步数）、start_date、end_date
     """
-    topic = request.args.get('topic', 'AI人工智能')
-    steps = int(request.args.get('steps', 7))
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
+    filters, error = parse_filters()
+    if error:
+        return error
+    topic = filters['topic'] if filters['topic'] != 'all' else 'AI人工智能'
+    steps, error = parse_bounded_int('steps', 7, 1, 30)
+    if error:
+        return error
+    start_date = filters['start_date']
+    end_date = filters['end_date']
 
     from storage.mongo_client import get_db
     from models.arima_model import ARIMAPredictor
     db = get_db()
 
-    series_data = db._load_from_json('time_series.json', topic=topic)
-    if not series_data:
-        series_data = db._load_from_json('time_series.json')
-
+    series_data = db.get_time_series(topic=topic)
     series_data = filter_time_series(series_data, start_date, end_date, topic)
 
     values = [d['value'] for d in series_data if d.get('topic') == topic]
-    if not values:
-        values = [100, 150, 200, 500, 2000, 8000, 15000, 12000, 8000, 5000,
-                  3000, 2000, 1500, 1200, 1000, 800, 700, 600, 500, 450]
+    if len(values) < 10:
+        return api_error(
+            'insufficient_data',
+            '当前话题和时间范围至少需要 10 个观测点才能运行 ARIMA 预测',
+            422,
+            topic=topic,
+            available_points=len(values),
+            required_points=10,
+        )
 
     arima = ARIMAPredictor()
-    arima.fit(values)
-    prediction = arima.predict(steps=steps)
+    try:
+        arima.fit(values)
+        prediction = arima.predict(steps=steps)
+    except Exception:
+        app.logger.exception('ARIMA fit failed for topic %s', topic)
+        return api_error('model_fit_failed', 'ARIMA 模型无法在当前数据上稳定拟合', 422, topic=topic)
 
     dates = [d['date'] for d in series_data if d.get('topic') == topic]
     history_dates = dates[-30:] if len(dates) >= 30 else dates
@@ -272,6 +407,10 @@ def api_arima_prediction():
 
     return jsonify({
         'topic': topic,
+        'interpretation': 'statistical_forecast',
+        'claim_scope': '仅适用于所示本地时间序列及置信区间，不证明外部场景有效性',
+        'observed_points': len(values),
+        'data_provenance': db.get_data_metadata(),
         'history_dates': history_dates,
         'history_values': history_values,
         'forecast': prediction['forecast'],
@@ -279,15 +418,19 @@ def api_arima_prediction():
         'upper_bound': prediction['upper_bound'],
         'trend': prediction.get('trend', '未知'),
         'change_rate': prediction.get('change_rate', 0),
+        'converged': prediction.get('converged'),
     })
 
 
 @app.route('/api/lda_topics')
 def api_lda_topics():
     """获取 LDA 主题分析结果"""
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    topic = request.args.get('topic', 'all')
+    filters, error = parse_filters()
+    if error:
+        return error
+    start_date = filters['start_date']
+    end_date = filters['end_date']
+    topic = filters['topic']
 
     from storage.mongo_client import get_db
     from processing.text_processor import TextProcessor
@@ -302,8 +445,18 @@ def api_lda_topics():
     tokenized = [processor.tokenize(text) for text in texts]
     tokenized = [t for t in tokenized if len(t) > 0]
 
+    if len(tokenized) < 10:
+        return api_error(
+            'insufficient_data', '当前筛选范围至少需要 10 篇有效文本才能运行 LDA', 422,
+            available_documents=len(tokenized), required_documents=10
+        )
+
     lda = LDAModel(num_topics=5)
-    lda.fit(tokenized)
+    try:
+        lda.fit(tokenized)
+    except Exception:
+        app.logger.exception('LDA fit failed')
+        return api_error('model_fit_failed', 'LDA 模型无法在当前数据上稳定拟合', 422)
     topics = lda.get_topics(top_k=8)
     return jsonify(topics)
 
@@ -311,9 +464,12 @@ def api_lda_topics():
 @app.route('/api/recent_posts')
 def api_recent_posts():
     """获取最新帖子"""
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    topic = request.args.get('topic', 'all')
+    filters, error = parse_filters()
+    if error:
+        return error
+    start_date = filters['start_date']
+    end_date = filters['end_date']
+    topic = filters['topic']
 
     from storage.mongo_client import get_db
     db = get_db()
@@ -342,14 +498,17 @@ def api_recent_posts():
 @app.route('/api/alerts')
 def api_alerts():
     """获取预警信息"""
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
+    filters, error = parse_filters()
+    if error:
+        return error
+    start_date = filters['start_date']
+    end_date = filters['end_date']
 
     from storage.mongo_client import get_db
     db = get_db()
     posts = db.get_all_posts(limit=200000)
 
-    posts = filter_posts(posts, start_date, end_date)
+    posts = filter_posts(posts, start_date, end_date, filters['topic'])
 
     stats = {}
     for p in posts:
@@ -384,97 +543,47 @@ def api_alerts():
 
 @app.route('/api/model_metrics')
 def api_model_metrics():
-    """获取模型评估指标"""
-    try:
-        from storage.mongo_client import get_db
-        from processing.text_processor import TextProcessor
-        from models.textcnn import TextCNNModel
-        from sklearn.model_selection import train_test_split
-        import numpy as np
+    """读取流水线生成的离线模型评估指标，不在 GET 请求中训练。"""
+    from storage.mongo_client import get_db
 
-        db = get_db()
-        processor = TextProcessor()
+    report = get_db().get_model_metrics()
+    if report is None:
+        return api_error(
+            'model_metrics_unavailable',
+            '尚无离线评估报告，请先运行 python scripts/run_pipeline.py',
+            503,
+        )
+    return jsonify(report)
 
-        posts = db.get_all_posts(limit=200000)
-        texts = [p.get('text', '') for p in posts]
-        labels = [p.get('sentiment', 0) for p in posts]
 
-        if len(texts) < 100:
-            return jsonify({
-                'error': '数据量不足',
-                'message': '至少需要100条数据才能评估模型'
-            }), 400
+@app.route('/api/data_status')
+def api_data_status():
+    """返回可审计的数据规模、时间范围和来源状态。"""
+    from storage.mongo_client import get_db
 
-        processor.build_vocab(texts)
-        sequences = processor.texts_to_sequences(texts)
-        X = np.array(sequences)
-        y = np.array(labels)
-
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.1, random_state=42)
-
-        model = TextCNNModel(vocab_size=len(processor.vocab))
-        model.build_model()
-
-        if model.model is None:
-            return jsonify({
-                'error': '模型初始化失败',
-                'message': 'PyTorch可能未安装'
-            }), 500
-
-        history = model.train(X_train, y_train, X_val, y_val)
-        metrics = model.evaluate(X_test, y_test)
-
-        if not metrics:
-            return jsonify({
-                'error': '模型评估失败',
-                'message': '模型可能未训练'
-            }), 500
-
-        from sklearn.metrics import precision_score, recall_score, f1_score
-        y_pred = model.predict(X_test)
-        if not y_pred:
-            return jsonify({
-                'error': '预测失败',
-                'message': '模型预测返回空结果'
-            }), 500
-
-        y_pred_class = np.array([p['label'] for p in y_pred])
-
-        precision = precision_score(y_test, y_pred_class)
-        recall = recall_score(y_test, y_pred_class)
-        f1 = f1_score(y_test, y_pred_class)
-
-        train_loss = []
-        val_loss = []
-        train_acc = []
-        val_acc = []
-        if history:
-            train_loss = [round(h['loss'], 4) for h in history]
-            val_loss = [round(h['loss'], 4) for h in history]
-            train_acc = [round(h.get('train_acc', 0), 4) for h in history]
-            val_acc = [round(h.get('val_acc', 0), 4) for h in history]
-
-        return jsonify({
-            'accuracy': round(metrics['accuracy'], 4),
-            'loss': round(metrics['loss'], 4),
-            'precision': round(precision, 4),
-            'recall': round(recall, 4),
-            'f1_score': round(f1, 4),
-            'train_loss': train_loss,
-            'val_loss': val_loss,
-            'train_acc': train_acc,
-            'val_acc': val_acc,
-            'epochs': len(history) if history else 0,
-        })
-    except Exception as e:
-        import traceback
-        print(f"❌ 模型评估失败: {e}")
-        traceback.print_exc()
-        return jsonify({
-            'error': str(e),
-            'message': '模型评估过程中发生错误'
-        }), 500
+    db = get_db()
+    posts = db.get_all_posts(limit=200000)
+    comments = db.get_all_comments()
+    series = db.get_time_series()
+    post_dates = sorted(p.get('created_at', '')[:10] for p in posts if p.get('created_at'))
+    sources = {}
+    for post in posts:
+        source = post.get('source') or '未知'
+        sources[source] = sources.get(source, 0) + 1
+    return jsonify({
+        'counts': {
+            'posts': len(posts),
+            'comments': len(comments),
+            'time_series_points': len(series),
+        },
+        'date_range': {
+            'start': post_dates[0] if post_dates else None,
+            'end': post_dates[-1] if post_dates else None,
+        },
+        'record_sources': sources,
+        'provenance': db.get_data_metadata(posts=posts),
+        'model_metrics_available': db.get_model_metrics() is not None,
+    })
 
 
 @app.route('/api/topics')
@@ -483,7 +592,7 @@ def api_topics():
     from storage.mongo_client import get_db
     db = get_db()
     posts = db.get_all_posts(limit=200000)
-    topics = sorted(set(p.get('topic', '') for p in posts))
+    topics = sorted({p.get('topic') for p in posts if p.get('topic')})
     return jsonify(topics)
 
 

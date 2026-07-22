@@ -61,6 +61,7 @@ class ARIMAPredictor:
         self.model = None
         self.fitted = None
         self.data = None
+        self.converged = None
 
     def check_stationarity(self, data):
         """
@@ -74,6 +75,13 @@ class ARIMAPredictor:
         if not HAS_STATSMODELS:
             return {'is_stationary': True, 'p_value': 0.0}
 
+        if len(data) < 4 or np.allclose(data, data[0]):
+            return {
+                'is_stationary': bool(np.allclose(data, data[0])),
+                'p_value': None,
+                'adf_statistic': None,
+                'critical_values': {},
+            }
         result = adfuller(data)
         p_value = result[1]
         is_stationary = p_value < 0.05
@@ -122,14 +130,19 @@ class ARIMAPredictor:
             auto_order: 是否自动确定参数
         """
         if not HAS_STATSMODELS:
-            print("⚠️  statsmodels 未安装")
-            return None
+            raise RuntimeError('statsmodels 未安装，无法拟合 ARIMA 模型')
 
         self.data = np.array(data, dtype=float)
+        if self.data.ndim != 1 or len(self.data) < 10:
+            raise ValueError('ARIMA 至少需要 10 个一维观测点')
+        if not np.all(np.isfinite(self.data)) or np.any(self.data < 0):
+            raise ValueError('ARIMA 观测数据必须是有限的非负数')
 
         # 平稳性检验
         stationarity = self.check_stationarity(self.data)
-        print(f"   ADF 检验 p值：{stationarity['p_value']:.4f}")
+        p_value = stationarity['p_value']
+        p_text = f'{p_value:.4f}' if p_value is not None else '不适用'
+        print(f"   ADF 检验 p值：{p_text}")
         print(f"   序列{'平稳' if stationarity['is_stationary'] else '非平稳'}")
 
         # 自动确定参数
@@ -139,8 +152,12 @@ class ARIMAPredictor:
         # 拟合模型
         self.model = ARIMA_Model(self.data, order=self.order)
         self.fitted = self.model.fit()
+        fit_details = getattr(self.fitted, 'mle_retvals', {}) or {}
+        self.converged = bool(fit_details.get('converged', True))
 
-        print(f"   ✅ ARIMA{self.order} 模型拟合完成")
+        marker = '✅' if self.converged else '⚠️'
+        state = '拟合收敛' if self.converged else '拟合未收敛，结果需谨慎解释'
+        print(f"   {marker} ARIMA{self.order} {state}")
         print(f"      AIC = {self.fitted.aic:.2f}")
         print(f"      BIC = {self.fitted.bic:.2f}")
 
@@ -155,7 +172,9 @@ class ARIMAPredictor:
         返回：
             dict: {forecast, lower_bound, upper_bound, dates}
         """
-        steps = steps or config.ARIMA_FORECAST_DAYS
+        steps = config.ARIMA_FORECAST_DAYS if steps is None else int(steps)
+        if steps < 1:
+            raise ValueError('steps 必须大于等于 1')
 
         if self.fitted is None:
             print("⚠️  模型未训练")
@@ -183,6 +202,7 @@ class ARIMAPredictor:
             'upper_bound': upper.tolist(),
             'steps': steps,
             'order': self.order,
+            'converged': self.converged,
         }
 
         # 判断趋势
