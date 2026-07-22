@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>工作台 · 舆情分析平台</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='product.css') }}">
+</head>
+<body>
+    <header class="topbar">
+        <a class="brand" href="/workspace"><span class="brand-dot"></span>舆情分析平台 <em>V1</em></a>
+        <nav aria-label="主导航">
+            <button class="nav-link active" data-section="overview">总览</button>
+            <button class="nav-link" data-section="collection">数据采集</button>
+            <button class="nav-link" data-section="analysis">分析任务</button>
+            <button class="nav-link" data-section="alerts">预警中心</button>
+            <button class="nav-link" data-section="reports">报告中心</button>
+            <button class="nav-link" data-section="settings">系统设置</button>
+        </nav>
+        <div class="account"><span>{{ username }}</span><button id="logout" class="ghost">退出</button></div>
+    </header>
+
+    <main class="workspace">
+        <section class="page active" id="section-overview">
+            <div class="page-heading">
+                <div><p class="eyebrow">OPERATIONS OVERVIEW</p><h1>今天的舆情工作，从这里开始。</h1></div>
+                <a class="button primary" href="/dashboard">打开分析大屏</a>
+            </div>
+            <div id="global-message" class="notice hidden" role="status"></div>
+            <div class="metric-grid">
+                <article class="metric"><span>采集任务</span><strong id="metric-collection">—</strong><small>全部任务</small></article>
+                <article class="metric"><span>成功入库</span><strong id="metric-posts">—</strong><small>去重后的帖子</small></article>
+                <article class="metric"><span>分析任务</span><strong id="metric-analysis">—</strong><small>已建立分析</small></article>
+                <article class="metric accent"><span>预警记录</span><strong id="metric-alerts">—</strong><small>需要人工复核</small></article>
+            </div>
+            <div class="two-column">
+                <article class="panel">
+                    <div class="panel-title"><div><p class="kicker">CRITICAL PATH</p><h2>产品闭环</h2></div></div>
+                    <ol class="flow-list">
+                        <li><span>01</span><div><strong>获得数据</strong><p>授权微博采集，或导入 JSON / CSV。</p></div></li>
+                        <li><span>02</span><div><strong>运行分析</strong><p>形成摘要、主题与时间序列证据。</p></div></li>
+                        <li><span>03</span><div><strong>复核预警</strong><p>回到原文，避免把模型标签当成事实。</p></div></li>
+                        <li><span>04</span><div><strong>导出报告</strong><p>记录样本范围、来源、结果与局限。</p></div></li>
+                    </ol>
+                </article>
+                <article class="panel">
+                    <div class="panel-title"><div><p class="kicker">SYSTEM STATE</p><h2>运行状态</h2></div><span id="ready-badge" class="status">检查中</span></div>
+                    <dl class="status-list">
+                        <div><dt>任务模式</dt><dd id="queue-mode">—</dd></div>
+                        <div><dt>微博采集器</dt><dd id="collector-state">—</dd></div>
+                        <div><dt>许可证确认</dt><dd id="license-state">—</dd></div>
+                        <div><dt>数据原则</dt><dd>不以模拟数据替代采集失败</dd></div>
+                    </dl>
+                </article>
+            </div>
+        </section>
+
+        <section class="page" id="section-collection">
+            <div class="page-heading"><div><p class="eyebrow">COLLECTION</p><h1>数据采集</h1><p>V1 仅接入微博公开数据；遇到验证时会暂停等待人工处理。</p></div></div>
+            <div class="two-column forms">
+                <article class="panel">
+                    <div class="panel-title"><div><p class="kicker">MEDIACRAWLER BRIDGE</p><h2>新建微博采集</h2></div></div>
+                    <form id="collection-form" class="stack-form">
+                        <label>关键词（逗号分隔）<input name="keywords" placeholder="例如：人工智能, 大模型" required></label>
+                        <label>最大页数<input name="max_pages" type="number" min="1" max="10" value="3" required></label>
+                        <label class="check"><input name="confirm" type="checkbox" required><span>我确认仅采集有权访问的公开数据，不绕过验证码与访问控制。</span></label>
+                        <button class="primary" type="submit">创建采集任务</button>
+                    </form>
+                </article>
+                <article class="panel">
+                    <div class="panel-title"><div><p class="kicker">SAFE FALLBACK</p><h2>导入已有数据</h2></div></div>
+                    <form id="import-form" class="stack-form">
+                        <label>话题名称<input name="topic" placeholder="例如：校园招聘" required></label>
+                        <label>数据文件<input name="file" type="file" accept=".json,.jsonl,.ndjson,.csv" required></label>
+                        <p class="help">最大 10 MB。数据必须包含正文，并尽量包含原始 ID、作者、时间与来源链接。</p>
+                        <button class="secondary" type="submit">上传并入库</button>
+                    </form>
+                </article>
+            </div>
+            <article class="panel table-panel"><div class="panel-title"><div><p class="kicker">JOB HISTORY</p><h2>采集任务</h2></div><button class="ghost refresh" data-refresh="collection">刷新</button></div><div class="table-wrap"><table><thead><tr><th>创建时间</th><th>来源</th><th>关键词</th><th>状态</th><th>进度</th><th>结果 / 原因</th></tr></thead><tbody id="collection-rows"></tbody></table></div></article>
+        </section>
+
+        <section class="page" id="section-analysis">
+            <div class="page-heading"><div><p class="eyebrow">ANALYSIS</p><h1>分析任务</h1><p>分析只使用已入库数据，并在数据不足时明确拒绝模型输出。</p></div></div>
+            <article class="panel form-panel">
+                <form id="analysis-form" class="inline-form">
+                    <label>分析类型<select name="type"><option value="full">完整分析</option><option value="summary">摘要与词频</option><option value="lda">主题分析</option><option value="arima">ARIMA 时间序列</option><option value="sir">SIR 传播情景</option></select></label>
+                    <label>话题<input name="topic" placeholder="留空表示全部"></label>
+                    <label>开始日期<input name="start_date" type="date"></label>
+                    <label>结束日期<input name="end_date" type="date"></label>
+                    <button class="primary" type="submit">开始分析</button>
+                </form>
+            </article>
+            <article class="panel table-panel"><div class="panel-title"><div><p class="kicker">ANALYSIS HISTORY</p><h2>分析任务</h2></div><button class="ghost refresh" data-refresh="analysis">刷新</button></div><div class="table-wrap"><table><thead><tr><th>创建时间</th><th>类型</th><th>范围</th><th>状态</th><th>样本</th><th>结果 / 原因</th></tr></thead><tbody id="analysis-rows"></tbody></table></div></article>
+        </section>
+
+        <section class="page" id="section-alerts">
+            <div class="page-heading"><div><p class="eyebrow">ALERTS</p><h1>预警中心</h1><p>预警是复核线索，不是事实判定；请结合原文和来源进行人工判断。</p></div></div>
+            <div id="alert-list" class="card-list"></div>
+        </section>
+
+        <section class="page" id="section-reports">
+            <div class="page-heading"><div><p class="eyebrow">REPORTS</p><h1>报告中心</h1><p>导出样本范围、来源统计、情感筛查结果与解释边界。</p></div></div>
+            <article class="panel form-panel">
+                <form id="report-form" class="inline-form">
+                    <label>格式<select name="format"><option value="pdf">PDF 报告</option><option value="csv">CSV 明细</option></select></label>
+                    <label>话题<input name="topic" placeholder="留空表示全部"></label>
+                    <label>开始日期<input name="start_date" type="date"></label>
+                    <label>结束日期<input name="end_date" type="date"></label>
+                    <button class="primary" type="submit">生成报告</button>
+                </form>
+            </article>
+            <article class="panel table-panel"><div class="panel-title"><div><p class="kicker">EXPORT HISTORY</p><h2>报告记录</h2></div><button class="ghost refresh" data-refresh="reports">刷新</button></div><div class="table-wrap"><table><thead><tr><th>创建时间</th><th>格式</th><th>范围</th><th>状态</th><th>样本</th><th>下载 / 原因</th></tr></thead><tbody id="report-rows"></tbody></table></div></article>
+        </section>
+
+        <section class="page" id="section-settings">
+            <div class="page-heading"><div><p class="eyebrow">SETTINGS</p><h1>系统设置</h1><p>敏感设置只能通过环境变量配置，页面不会显示密码、Cookie 或密钥。</p></div></div>
+            <div class="two-column">
+                <article class="panel"><div class="panel-title"><h2>部署信息</h2></div><dl class="status-list" id="settings-list"></dl></article>
+                <article class="panel"><div class="panel-title"><h2>修改密码</h2></div><form id="password-form" class="stack-form"><label>当前密码<input name="current_password" type="password" required></label><label>新密码<input name="new_password" type="password" minlength="10" required></label><button class="secondary" type="submit">修改并重新登录</button></form></article>
+            </div>
+            <article class="panel compliance"><h2>采集边界</h2><p>MediaCrawler 必须独立安装并遵守其许可证。本系统不分发其源码，不保存账号密码，不绕过验证码、登录限制或访问控制。商业使用前必须换用获得授权的数据接口。</p></article>
+        </section>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="{{ url_for('static', filename='product.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>登录 · 舆情分析平台</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='product.css') }}">
+</head>
+<body class="login-body">
+    <main class="login-shell">
+        <section class="login-intro">
+            <p class="eyebrow">SOCIAL SIGNAL WORKSPACE</p>
+            <h1>从公开信号中，<br>找到值得行动的变化。</h1>
+            <p>采集、清洗、分析、预警与报告形成一条可追踪的证据链。</p>
+            <div class="trust-row">
+                <span>来源可追踪</span><span>失败不伪造</span><span>边界可解释</span>
+            </div>
+        </section>
+        <section class="login-card" aria-labelledby="login-title">
+            <p class="brand-mark">舆情分析平台 <strong>V1</strong></p>
+            <h2 id="login-title">管理员登录</h2>
+            <p class="muted">此系统不开放注册，仅供项目管理员使用。</p>
+            {% if setup_required %}
+            <div class="notice warning" role="alert">
+                尚未初始化管理员。请设置 <code>ADMIN_PASSWORD</code> 后重启服务。
+            </div>
+            {% endif %}
+            <form id="login-form" autocomplete="on">
+                <label>用户名
+                    <input name="username" value="admin" autocomplete="username" required>
+                </label>
+                <label>密码
+                    <input name="password" type="password" autocomplete="current-password" required>
+                </label>
+                <button type="submit" class="primary wide">进入工作台</button>
+            </form>
+            <p id="login-message" class="form-message" aria-live="polite"></p>
+        </section>
+    </main>
+    <script>
+    document.getElementById('login-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = event.currentTarget.querySelector('button');
+        const message = document.getElementById('login-message');
+        button.disabled = true;
+        message.textContent = '正在验证…';
+        const body = Object.fromEntries(new FormData(event.currentTarget));
+        try {
+            const response = await fetch('/api/v1/auth/login', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error?.message || '登录失败');
+            window.location.href = '/workspace';
+        } catch (error) {
+            message.textContent = error.message;
+            message.className = 'form-message error-text';
+        } finally {
+            button.disabled = false;
+        }
+    });
+    </script>
+</body>
+</html>

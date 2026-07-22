@@ -125,6 +125,37 @@ class MongoStorage:
 
     # ==================== 数据查询 ====================
 
+    def _product_records(self, kind, limit):
+        """Load normalized SQLite records only when the product DB exists."""
+        if not os.path.exists(config.PRODUCT_DB_PATH):
+            return []
+        try:
+            from storage.product_store import get_product_store
+            store = get_product_store()
+            if kind == 'posts':
+                return store.list_legacy_posts(limit=limit)
+            if kind == 'comments':
+                return store.list_legacy_comments(limit=limit)
+            if kind == 'series':
+                return store.daily_series()
+        except Exception:
+            return []
+        return []
+
+    @staticmethod
+    def _merge_unique(primary, secondary, key, limit):
+        result = []
+        seen = set()
+        for item in list(primary) + list(secondary):
+            identity = item.get(key)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            result.append(item)
+            if len(result) >= limit:
+                break
+        return result
+
     def get_posts_by_topic(self, topic, limit=100):
         """按话题查询帖子"""
         if self._connected:
@@ -140,22 +171,39 @@ class MongoStorage:
     def get_all_posts(self, limit=1000):
         """获取所有帖子"""
         if self._connected:
-            return list(self.posts.find().limit(limit))
-        return self._load_from_json('posts.json')[:limit]
+            primary = list(self.posts.find().limit(limit))
+        else:
+            primary = self._load_from_json('posts.json')[:limit]
+        return self._merge_unique(
+            primary, self._product_records('posts', limit), 'post_id', limit
+        )
 
     def get_all_comments(self, limit=1000000):
         """获取所有评论。"""
         if self._connected:
-            return list(self.comments.find().limit(limit))
-        return self._load_from_json('comments.json')[:limit]
+            primary = list(self.comments.find().limit(limit))
+        else:
+            primary = self._load_from_json('comments.json')[:limit]
+        return self._merge_unique(
+            primary, self._product_records('comments', limit), 'comment_id', limit
+        )
 
     def get_time_series(self, topic=None):
         """获取话题时间序列。"""
         filters = {'topic': topic} if topic and topic != 'all' else {}
-        return self._load_from_json('time_series.json', **filters)
+        primary = self._load_from_json('time_series.json', **filters)
+        product = self._product_records('series', 1000000)
+        if filters:
+            product = [item for item in product if item.get('topic') == topic]
+        return primary + product
 
     def get_data_metadata(self, posts=None):
         """读取数据来源清单；缺失时只返回有边界的推断。"""
+        sample = posts if posts is not None else self.get_all_posts(limit=1000)
+        has_observed = any(
+            item.get('data_kind') in {'observed_public_data', 'observed_api_response'}
+            for item in sample
+        )
         if os.path.exists(config.DATASET_METADATA_PATH):
             try:
                 with open(config.DATASET_METADATA_PATH, 'r', encoding='utf-8') as f:
@@ -163,6 +211,13 @@ class MongoStorage:
                 if not isinstance(metadata, dict) or not metadata.get('dataset_type'):
                     raise ValueError('metadata.json 缺少 dataset_type')
                 metadata.setdefault('evidence_status', 'verified')
+                if has_observed:
+                    metadata = dict(metadata)
+                    metadata['dataset_type'] = 'mixed'
+                    metadata['evidence_status'] = 'verified'
+                    metadata['limitations'] = list(metadata.get('limitations', [])) + [
+                        '结果混合了本地基线数据与用户授权采集的公开记录，必须按来源解释。'
+                    ]
                 return metadata
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 return {
@@ -172,15 +227,18 @@ class MongoStorage:
                     'limitations': [f'数据来源清单不可用：{exc}'],
                 }
 
-        sample = posts if posts is not None else self.get_all_posts(limit=1000)
         identifiers = [str(item.get('post_id', '')) for item in sample]
         looks_synthetic = bool(identifiers) and all(
             identifier.startswith(('post_', 'sim_')) for identifier in identifiers
         )
         return {
             'schema_version': 1,
-            'dataset_type': 'synthetic' if looks_synthetic else 'unknown',
-            'evidence_status': 'inferred' if looks_synthetic else 'unknown',
+            'dataset_type': 'observed_public_data' if has_observed else (
+                'synthetic' if looks_synthetic else 'unknown'
+            ),
+            'evidence_status': 'verified' if has_observed else (
+                'inferred' if looks_synthetic else 'unknown'
+            ),
             'generator': None,
             'generated_at': None,
             'seed': None,
