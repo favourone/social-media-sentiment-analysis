@@ -13,7 +13,7 @@
 - 摘要、词频、LDA、ARIMA、SIR 和已有大屏分析能力；
 - 带样本量、来源和解释边界的预警、PDF 报告与 CSV 明细；
 - Docker Compose 的 Web、RQ Worker、Redis 和持久卷；
-- 健康检查、自动化测试、CI 和证据文档。
+- 健康检查、自动化测试、GitHub Actions CI 模板和证据文档。
 
 ## 使用 Conda `cv` 环境运行（推荐）
 
@@ -192,7 +192,7 @@ python -m coverage run --source=crawler.adapters,services,storage.product_store,
 python -m coverage report -m
 ```
 
-CI 只使用固定测试夹具和模拟采集适配路径，不连接真实社交平台。真实微博冒烟测试必须由用户扫码授权后手动执行。
+CI 模板位于 `docs/ci/github-actions.yml`，只使用固定测试夹具和模拟采集适配路径，不连接真实社交平台。当前模板不会被 GitHub 自动执行；为远程凭据增加 `workflow` 权限后，可将它复制到 `.github/workflows/ci.yml` 并单独提交。真实微博冒烟测试必须由用户扫码授权后手动执行。
 
 ## 备份、恢复与故障排查
 
