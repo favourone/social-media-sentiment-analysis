@@ -7,6 +7,13 @@
 
 import os
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # Docker supplies env_file directly; python-dotenv is only a local convenience.
+    pass
+
 
 def env_bool(name, default=False):
     """Parse a boolean environment variable without surprising truthiness."""
@@ -23,6 +30,18 @@ PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'processed')
 MODEL_DIR = os.path.join(BASE_DIR, 'models', 'saved')
 DATASET_METADATA_PATH = os.path.join(RAW_DATA_DIR, 'metadata.json')
 MODEL_METRICS_PATH = os.path.join(PROCESSED_DATA_DIR, 'model_metrics.json')
+RUNTIME_DIR = os.path.abspath(os.environ.get(
+    'RUNTIME_DIR', os.path.join(BASE_DIR, 'runtime')
+))
+PRODUCT_DB_PATH = os.path.abspath(os.environ.get(
+    'PRODUCT_DB_PATH', os.path.join(RUNTIME_DIR, 'sentiment.db')
+))
+REPORT_DIR = os.path.abspath(os.environ.get(
+    'REPORT_DIR', os.path.join(RUNTIME_DIR, 'reports')
+))
+IMPORT_DIR = os.path.abspath(os.environ.get(
+    'IMPORT_DIR', os.path.join(RUNTIME_DIR, 'imports')
+))
 
 # ==================== MongoDB 配置 ====================
 MONGO_ENABLED = env_bool('MONGO_ENABLED', False)
@@ -36,10 +55,15 @@ MONGO_COLLECTION_TOPICS = 'topics'          # 话题
 MONGO_COLLECTION_PREDICTIONS = 'predictions' # 预测结果
 
 # ==================== Redis 配置 ====================
-REDIS_HOST = 'localhost'
-REDIS_PORT = 6379
-REDIS_DB = 0
+REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
+REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
+REDIS_DB = int(os.environ.get('REDIS_DB', 0))
+REDIS_URL = os.environ.get(
+    'REDIS_URL', f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
+)
 REDIS_CACHE_TTL = 3600  # 缓存过期时间（秒）
+TASK_QUEUE_MODE = os.environ.get('TASK_QUEUE_MODE', 'inline').strip().lower()
+RQ_QUEUE_NAME = os.environ.get('RQ_QUEUE_NAME', 'sentiment-jobs')
 
 # ==================== 爬虫配置 ====================
 CRAWLER_HEADERS = {
@@ -49,6 +73,17 @@ CRAWLER_HEADERS = {
 }
 CRAWLER_DELAY = 2       # 请求间隔（秒）
 CRAWLER_MAX_PAGES = 50  # 最大爬取页数
+MEDIACRAWLER_HOME = os.path.abspath(os.environ.get(
+    'MEDIACRAWLER_HOME', os.path.join(BASE_DIR, 'external', 'MediaCrawler')
+))
+MEDIACRAWLER_COMMAND_JSON = os.environ.get('MEDIACRAWLER_COMMAND_JSON', '')
+MEDIACRAWLER_OUTPUT_DIR = os.path.abspath(os.environ.get(
+    'MEDIACRAWLER_OUTPUT_DIR', os.path.join(MEDIACRAWLER_HOME, 'data')
+))
+MEDIACRAWLER_TIMEOUT_SECONDS = int(os.environ.get(
+    'MEDIACRAWLER_TIMEOUT_SECONDS', 1800
+))
+COLLECTOR_LICENSE_ACCEPTED = env_bool('COLLECTOR_LICENSE_ACCEPTED', False)
 
 # ==================== NLP 配置 ====================
 STOPWORDS_PATH = os.path.join(DATA_DIR, 'stopwords.txt')
@@ -90,6 +125,13 @@ CORS_ORIGINS = [
     for origin in os.environ.get('CORS_ORIGINS', '').split(',')
     if origin.strip()
 ]
+APP_SECRET_KEY = os.environ.get('APP_SECRET_KEY', '')
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin').strip() or 'admin'
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
+SESSION_HOURS = int(os.environ.get('SESSION_HOURS', 8))
+LOGIN_MAX_ATTEMPTS = int(os.environ.get('LOGIN_MAX_ATTEMPTS', 5))
+LOGIN_WINDOW_SECONDS = int(os.environ.get('LOGIN_WINDOW_SECONDS', 300))
+MAX_UPLOAD_BYTES = int(os.environ.get('MAX_UPLOAD_BYTES', 10 * 1024 * 1024))
 
 # ==================== 情感标签 ====================
 SENTIMENT_LABELS = {0: '负面', 1: '正面'}

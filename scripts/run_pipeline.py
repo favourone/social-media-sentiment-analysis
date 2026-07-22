@@ -277,13 +277,17 @@ def step4_topic_and_prediction(posts, tokenized):
     sir = SIRModel()
     if len(values) > 5:
         sir_result = sir.fit(values[:30])
+        print(f"   话题「{test_topic}」传播情景模拟：")
+        print(f"      峰值时间：第 {sir_result['peak_day']:.1f} 天")
+        print(f"      峰值讨论量：{sir_result['peak_value']:.0f}")
+        print(f"      R₀(情景参数)：{sir_result['R0']:.2f}")
     else:
-        sir_result = sir.simulate(100, 30)
-
-    print(f"   话题「{test_topic}」传播预测：")
-    print(f"      峰值时间：第 {sir_result['peak_day']:.1f} 天")
-    print(f"      峰值讨论人数：{sir_result['peak_value']:.0f}")
-    print(f"      R₀(基本再生数)：{sir_result['R0']:.2f}")
+        sir_result = {
+            'available': False,
+            'reason': 'SIR 情景模拟至少需要 6 个观测点',
+            'available_points': len(values),
+        }
+        print(f"   ⚠️  {sir_result['reason']}，跳过 SIR，不生成模拟替代结果")
 
     # 4.3 ARIMA 时间序列预测
     print("\n   [4.3] ARIMA 时间序列预测...")
@@ -294,11 +298,12 @@ def step4_topic_and_prediction(posts, tokenized):
         arima.fit(values)
         forecast = arima.predict(steps=7)
     else:
-        print("   ⚠️  数据量不足，使用模拟数据")
-        mock_data = [100, 150, 200, 500, 2000, 8000, 15000, 12000, 8000, 5000,
-                     3000, 2000, 1500, 1200, 1000, 800, 700, 600, 500, 450]
-        arima.fit(mock_data)
-        forecast = arima.predict(steps=7)
+        forecast = {
+            'available': False,
+            'reason': 'ARIMA 预测至少需要 11 个观测点',
+            'available_points': len(values),
+        }
+        print(f"   ⚠️  {forecast['reason']}，跳过 ARIMA，不生成模拟替代结果")
 
     return {'sir': sir_result, 'arima': forecast}
 

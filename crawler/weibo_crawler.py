@@ -8,7 +8,7 @@
 3. 爬取帖子评论
 
 注意：实际使用时需要配置 Cookie 或使用微博开放平台 API
-本模块同时提供模拟数据生成作为 fallback
+本模块不会在网络失败时自动返回模拟数据；演示数据必须显式生成。
 """
 
 import os
@@ -64,7 +64,7 @@ class WeiboCrawler:
             return hot_list
         except Exception as e:
             print(f"   ⚠️  热搜获取失败：{e}")
-            return self._mock_hot_search()
+            return []
 
     def search_topic(self, keyword, pages=5):
         """
@@ -107,20 +107,20 @@ class WeiboCrawler:
 
         return posts
 
-    def _mock_hot_search(self):
-        """模拟热搜数据（API不可用时的fallback）"""
-        mock_data = [
+    def get_demo_hot_search(self):
+        """显式获取演示数据；不会被真实采集流程自动调用。"""
+        demo_data = [
             {"rank": 1, "keyword": "AI大模型突破", "hot_value": 987654},
             {"rank": 2, "keyword": "高考改革新方案", "hot_value": 876543},
             {"rank": 3, "keyword": "华为新品发布", "hot_value": 765432},
             {"rank": 4, "keyword": "房价最新政策", "hot_value": 654321},
             {"rank": 5, "keyword": "世界杯预选赛", "hot_value": 543210},
         ]
-        for item in mock_data:
-            item['data_kind'] = 'synthetic_fallback'
+        for item in demo_data:
+            item['data_kind'] = 'synthetic_demo'
             item['source'] = '内置演示数据'
-        print(f"   使用模拟热搜数据（{len(mock_data)} 条）")
-        return mock_data
+        print(f"   显式使用模拟热搜演示数据（{len(demo_data)} 条）")
+        return demo_data
 
 
 class ZhihuCrawler:

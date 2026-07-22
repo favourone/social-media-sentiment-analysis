@@ -13,3 +13,10 @@
 | TextCNN 词表仅由训练集构建 | verified | `test_vocabulary_is_built_from_training_text_only` | 120 条带唯一 token 的分层拆分夹具 | 未在本轮重新训练完整 2,000 条本地数据 |
 | 当前本地 AI 话题可运行 SIR/ARIMA | verified | `validation.md` 原始复测记录 | 60 个观测点；SIR 7 天、ARIMA 7 步 | SIR NRMSE 0.2695，拟合有限；ARIMA 只适用于当前序列 |
 | 项目已在真实社交媒体场景有效 | unknown | 无真实目标场景测试 | 无 | 下一步做带来源的数据验证与用户任务测试 |
+| V1 新增核心模块覆盖率达到 80% 门槛 | verified | `tests/test_product_workflow.py`、`product-v1-validation.md` | Conda `cv`，coverage 同一命令复测，880/1076 语句，82% | 任务模块单独为 71%；覆盖率不等于业务有效性 |
+| 采集失败不会自动产生模拟帖子 | verified | `test_unconfigured_live_collector_pauses_without_fake_data` | 未接受许可证时任务进入 paused，错误码明确，入库数为 0 | 尚未真实扫码采集 |
+| SQLite 能阻止重复平台记录 | verified | `test_platform_source_id_is_unique`、导入闭环测试 | 同一微博 ID 重复写入；第二次 12 条全部计为重复 | 未做多进程高并发写入压测 |
+| 单管理员业务接口受登录和 CSRF 保护 | verified | `test_protected_endpoints_require_login_and_csrf` | Flask 测试客户端检查 401/403 与成功登录 | 登录限流为单进程内存状态，未做分布式部署 |
+| PDF 与 CSV 报告可生成和下载 | verified | `test_pdf_report_can_be_generated_and_downloaded`、CSV 对应用例 | 固定导入夹具；检查 PDF/CSV 文件签名 | 未做多页报告视觉人工复核 |
+| Docker Compose 可冷启动并持久化重启 | unknown | 当前主机没有 `docker` 命令 | 未执行 | 在装有 Docker 的机器运行构建、健康检查和卷重启验收 |
+| 外部 MediaCrawler 能在真实微博完成授权采集 | unknown | 仅完成固定版本适配器与伪进程测试 | 无真实账号和扫码执行 | 合规授权后做人工冒烟测试 |

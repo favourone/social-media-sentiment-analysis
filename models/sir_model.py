@@ -200,13 +200,13 @@ class SIRModel:
         print(f"   ✅ SIR 模型拟合完成")
         print(f"      β(传播率) = {self.beta:.4f}")
         print(f"      γ(恢复率) = {self.gamma:.4f}")
-        print(f"      R₀(基本再生数) = {self.R0:.2f}")
+        print(f"      R₀(传播情景参数) = {self.R0:.2f}")
         print(f"      归一化RMSE = {self.fit_nrmse:.4f}")
 
         if self.R0 > 1:
-            print(f"      📈 R₀ > 1，话题将爆发传播")
+            print(f"      📈 R₀ > 1，当前拟合情景偏增长；不代表因果预测")
         else:
-            print(f"      📉 R₀ < 1，话题将自然消退")
+            print(f"      📉 R₀ < 1，当前拟合情景偏消退；不代表因果预测")
 
         return self.simulate(I0, days)
 
