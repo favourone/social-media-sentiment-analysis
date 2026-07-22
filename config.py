@@ -7,17 +7,29 @@
 
 import os
 
+
+def env_bool(name, default=False):
+    """Parse a boolean environment variable without surprising truthiness."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {'1', 'true', 'yes', 'on'}
+
 # ==================== 基础路径 ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 RAW_DATA_DIR = os.path.join(DATA_DIR, 'raw')
 PROCESSED_DATA_DIR = os.path.join(DATA_DIR, 'processed')
 MODEL_DIR = os.path.join(BASE_DIR, 'models', 'saved')
+DATASET_METADATA_PATH = os.path.join(RAW_DATA_DIR, 'metadata.json')
+MODEL_METRICS_PATH = os.path.join(PROCESSED_DATA_DIR, 'model_metrics.json')
 
 # ==================== MongoDB 配置 ====================
-MONGO_HOST = 'localhost'
-MONGO_PORT = 27017
-MONGO_DB = 'sentiment_db'
+MONGO_ENABLED = env_bool('MONGO_ENABLED', False)
+MONGO_HOST = os.environ.get('MONGO_HOST', 'localhost')
+MONGO_PORT = int(os.environ.get('MONGO_PORT', 27017))
+MONGO_DB = os.environ.get('MONGO_DB', 'sentiment_db')
+MONGO_CONNECT_TIMEOUT_MS = int(os.environ.get('MONGO_CONNECT_TIMEOUT_MS', 3000))
 MONGO_COLLECTION_POSTS = 'posts'           # 帖子/微博
 MONGO_COLLECTION_COMMENTS = 'comments'      # 评论
 MONGO_COLLECTION_TOPICS = 'topics'          # 话题
@@ -52,6 +64,7 @@ TEXTCNN_LEARNING_RATE = 0.001        # 学习率
 TEXTCNN_BATCH_SIZE = 64              # 批大小
 TEXTCNN_EPOCHS = 20                  # 训练轮数
 TEXTCNN_NUM_CLASSES = 2              # 分类数（正面/负面）
+RANDOM_SEED = int(os.environ.get('RANDOM_SEED', 42))
 
 # ==================== LDA 模型配置 ====================
 LDA_NUM_TOPICS = 10      # 主题数量
@@ -71,7 +84,12 @@ ARIMA_FORECAST_DAYS = 7  # 预测天数
 # ==================== Web 配置 ====================
 WEB_HOST = '0.0.0.0'
 WEB_PORT = int(os.environ.get('WEB_PORT', 5000))
-WEB_DEBUG = True
+WEB_DEBUG = env_bool('WEB_DEBUG', False)
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get('CORS_ORIGINS', '').split(',')
+    if origin.strip()
+]
 
 # ==================== 情感标签 ====================
 SENTIMENT_LABELS = {0: '负面', 1: '正面'}

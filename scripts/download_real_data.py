@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-真实数据下载脚本
-================
-从公开数据源下载中文情感分析数据，转换为项目统一格式
+公开情感语料下载与派生演示数据脚本
+==============================
+从公开中文情感语料构造项目格式。原始文本/标签来自公开语料，话题、时间、互动量和评论是合成字段；
+因此产物不是“真实社交媒体数据”，不得用于证明真实舆情效果。
 
 数据来源：
 1. ChnSentiCorp - 中文情感语料库（酒店评论，约12000条）
@@ -27,8 +28,6 @@ import config
 
 try:
     import requests
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     HAS_REQUESTS = True
 except ImportError:
     HAS_REQUESTS = False
@@ -56,7 +55,7 @@ def download_file(url, save_path, timeout=30):
 
     try:
         print(f"   下载中: {url[:80]}...")
-        resp = requests.get(url, timeout=timeout, verify=False, headers={
+        resp = requests.get(url, timeout=timeout, headers={
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'
         })
         resp.raise_for_status()
@@ -122,7 +121,7 @@ def load_waimai(csv_path):
     return data
 
 
-def convert_to_project_format(raw_data, source_name, topics=None):
+def convert_to_project_format(raw_data, source_name, topics=None, id_prefix='derived'):
     """
     将原始数据转换为项目统一格式
 
@@ -155,7 +154,7 @@ def convert_to_project_format(raw_data, source_name, topics=None):
 
         # 生成帖子
         post = {
-            "post_id": f"real_{i:06d}",
+            "post_id": f"{id_prefix}_{i:06d}",
             "user_name": f"user_{random.randint(1000, 9999)}",
             "text": text,
             "topic": topic,
@@ -166,6 +165,9 @@ def convert_to_project_format(raw_data, source_name, topics=None):
             "comment_count": random.randint(0, 200),
             "created_at": post_time.strftime("%Y-%m-%d %H:%M:%S"),
             "source": source_name,
+            "data_kind": "derived_public_corpus",
+            "topic_assignment": "synthetic_random",
+            "engagement_fields": "synthetic",
         }
         posts.append(post)
 
@@ -174,13 +176,14 @@ def convert_to_project_format(raw_data, source_name, topics=None):
         for j in range(num_comments):
             comment_time = post_time + timedelta(hours=random.randint(0, 48))
             comment = {
-                "comment_id": f"cmt_{i}_{j}",
+                "comment_id": f"{id_prefix}_cmt_{i}_{j}",
                 "post_id": post["post_id"],
                 "user_name": f"user_{random.randint(1000, 9999)}",
                 "text": text[:50] if len(text) > 50 else text,  # 评论通常较短
                 "sentiment": sentiment if random.random() > 0.2 else 1 - sentiment,  # 80%同向
                 "likes": random.randint(0, 100),
                 "created_at": comment_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "data_kind": "synthetic_comment_from_public_corpus",
             }
             comments.append(comment)
 
@@ -209,6 +212,7 @@ def generate_time_series_from_posts(posts, days=60):
                 "date": date,
                 "value": value,
                 "topic": topic,
+                "data_kind": "derived_with_synthetic_gap_fill",
             })
 
     return time_series
@@ -218,12 +222,14 @@ def generate_time_series_from_posts(posts, days=60):
 
 def main():
     print("=" * 60)
-    print("  真实数据下载与处理")
+    print("  公开情感语料下载与派生演示数据处理")
     print("=" * 60)
 
     os.makedirs(config.RAW_DATA_DIR, exist_ok=True)
     all_posts = []
     all_comments = []
+    merged_synthetic_count = 0
+    random.seed(config.RANDOM_SEED)
 
     # ---- 1. 下载 ChnSentiCorp ----
     print("\n[1/3] 下载 ChnSentiCorp 酒店评论数据集...")
@@ -242,7 +248,9 @@ def main():
         print(f"   加载 {len(raw_data)} 条数据")
         # 取前10000条（太多会很慢）
         sample = raw_data[:10000] if len(raw_data) > 10000 else raw_data
-        posts, comments = convert_to_project_format(sample, "酒店评论")
+        posts, comments = convert_to_project_format(
+            sample, "酒店评论", id_prefix='chnsenticorp'
+        )
         all_posts.extend(posts)
         all_comments.extend(comments)
         print(f"   转换: {len(posts)} 条帖子, {len(comments)} 条评论")
@@ -260,7 +268,9 @@ def main():
     if os.path.exists(waimai_path):
         raw_data = load_waimai(waimai_path)
         print(f"   加载 {len(raw_data)} 条数据")
-        posts, comments = convert_to_project_format(raw_data, "外卖评价")
+        posts, comments = convert_to_project_format(
+            raw_data, "外卖评价", id_prefix='waimai'
+        )
         all_posts.extend(posts)
         all_comments.extend(comments)
         print(f"   转换: {len(posts)} 条帖子, {len(comments)} 条评论")
@@ -281,6 +291,7 @@ def main():
                 for p in existing:
                     p['post_id'] = f"sim_{p['post_id']}"
                 all_posts.extend(existing)
+                merged_synthetic_count = len(existing)
                 print(f"\n   合并已有模拟数据: {len(existing)} 条")
 
         # 保存
@@ -294,6 +305,23 @@ def main():
         series_path = os.path.join(config.RAW_DATA_DIR, 'time_series.json')
         with open(series_path, 'w', encoding='utf-8') as f:
             json.dump(time_series, f, ensure_ascii=False, indent=2)
+        metadata = {
+            "schema_version": 1,
+            "dataset_type": "mixed_derived_and_synthetic" if merged_synthetic_count else "derived_public_corpus_with_synthetic_metadata",
+            "evidence_status": "verified",
+            "generator": "scripts/download_real_data.py",
+            "generated_at": datetime.now().isoformat(timespec='seconds'),
+            "seed": config.RANDOM_SEED,
+            "source_corpora": ["ChnSentiCorp", "waimai_10k"],
+            "merged_synthetic_posts": merged_synthetic_count,
+            "limitations": [
+                "原始文本和情感标签来自公开评论语料，不是社交媒体舆情样本。",
+                "话题、账号、时间、互动量和派生评论为合成字段。",
+                "不能用该数据验证真实话题传播、用户行为或平台差异。",
+            ],
+        }
+        with open(config.DATASET_METADATA_PATH, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
 
         # 统计
         positive = sum(1 for p in all_posts if p['sentiment'] == 1)

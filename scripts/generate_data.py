@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import random
+import argparse
 from datetime import datetime, timedelta
 
 # Windows 终端 UTF-8 编码修复
@@ -125,13 +126,14 @@ def generate_comment_text(sentiment):
     return random.choice(templates)
 
 
-def generate_time_series(topic_name, days=60):
+def generate_time_series(topic_name, days=60, reference_time=None):
     """
     生成话题热度时间序列
     模拟典型的舆论传播曲线：爆发 → 高峰 → 衰减
     """
     series = []
-    base_date = datetime.now() - timedelta(days=days)
+    reference_time = reference_time or datetime.now()
+    base_date = reference_time - timedelta(days=days)
 
     # 随机选择爆发日
     outbreak_day = random.randint(5, days - 15)
@@ -161,13 +163,18 @@ def generate_time_series(topic_name, days=60):
             "date": date.strftime("%Y-%m-%d"),
             "value": max(0, value),
             "topic": topic_name,
+            "data_kind": "synthetic",
         })
 
     return series
 
 
-def generate_dataset(num_posts=2000, num_comments=8000):
+def generate_dataset(num_posts=2000, num_comments=8000, seed=42, reference_time=None):
     """生成完整数据集"""
+    if num_posts < 1 or num_comments < 0:
+        raise ValueError('num_posts 必须大于 0，num_comments 不能为负数')
+    random.seed(seed)
+    reference_time = reference_time or datetime.now()
     print("=" * 60)
     print("  社交媒体舆情分析系统 - 模拟数据生成")
     print("=" * 60)
@@ -181,7 +188,7 @@ def generate_dataset(num_posts=2000, num_comments=8000):
     for i in range(num_posts):
         topic_info = random.choice(TOPIC_TEMPLATES)
         sentiment = random.choices([0, 1], weights=[0.4, 0.6])[0]  # 60%正面
-        post_time = datetime.now() - timedelta(
+        post_time = reference_time - timedelta(
             days=random.randint(0, 60),
             hours=random.randint(0, 23),
             minutes=random.randint(0, 59)
@@ -199,6 +206,7 @@ def generate_dataset(num_posts=2000, num_comments=8000):
             "comment_count": random.randint(0, 5000),
             "created_at": post_time.strftime("%Y-%m-%d %H:%M:%S"),
             "source": random.choice(["微博", "知乎", "豆瓣"]),
+            "data_kind": "synthetic",
         }
         posts.append(post)
 
@@ -220,13 +228,16 @@ def generate_dataset(num_posts=2000, num_comments=8000):
             "sentiment": sentiment,
             "likes": random.randint(0, 1000),
             "created_at": comment_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "data_kind": "synthetic",
         }
         comments.append(comment)
 
     # 生成时间序列
     print("[3/3] 生成话题热度时间序列...")
     for topic_info in TOPIC_TEMPLATES:
-        series = generate_time_series(topic_info["topic"], days=60)
+        series = generate_time_series(
+            topic_info["topic"], days=60, reference_time=reference_time
+        )
         time_series_all.extend(series)
 
     # 保存数据
@@ -242,11 +253,32 @@ def generate_dataset(num_posts=2000, num_comments=8000):
         json.dump(comments, f, ensure_ascii=False, indent=2)
     with open(series_path, 'w', encoding='utf-8') as f:
         json.dump(time_series_all, f, ensure_ascii=False, indent=2)
+    metadata = {
+        "schema_version": 1,
+        "dataset_type": "synthetic",
+        "evidence_status": "verified",
+        "generator": "scripts/generate_data.py",
+        "generated_at": datetime.now().isoformat(timespec='seconds'),
+        "reference_time": reference_time.isoformat(timespec='seconds'),
+        "seed": seed,
+        "counts": {
+            "posts": len(posts),
+            "comments": len(comments),
+            "time_series_points": len(time_series_all),
+        },
+        "limitations": [
+            "文本、账号、互动量、平台和时间均为程序生成，仅用于开发与演示。",
+            "模型结果不得表述为真实社交媒体准确率、传播规模或用户影响。",
+        ],
+    }
+    with open(config.DATASET_METADATA_PATH, 'w', encoding='utf-8') as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
 
     print(f"\n✅ 数据生成完成！")
     print(f"   帖子数据：{posts_path} ({len(posts)} 条)")
     print(f"   评论数据：{comments_path} ({len(comments)} 条)")
     print(f"   时间序列：{series_path} ({len(time_series_all)} 条)")
+    print(f"   来源清单：{config.DATASET_METADATA_PATH}")
 
     # 生成停用词表
     stopwords_path = os.path.join(config.DATA_DIR, 'stopwords.txt')
@@ -266,4 +298,14 @@ def generate_dataset(num_posts=2000, num_comments=8000):
 
 
 if __name__ == '__main__':
-    generate_dataset()
+    parser = argparse.ArgumentParser(description='生成带来源清单的可复现模拟数据')
+    parser.add_argument('--posts', type=int, default=2000)
+    parser.add_argument('--comments', type=int, default=8000)
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument(
+        '--reference-time',
+        help='ISO 时间；与 seed 一起可完全复现数据，例如 2026-07-01T12:00:00',
+    )
+    args = parser.parse_args()
+    reference_time = datetime.fromisoformat(args.reference_time) if args.reference_time else None
+    generate_dataset(args.posts, args.comments, args.seed, reference_time)

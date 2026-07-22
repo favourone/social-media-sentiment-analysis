@@ -270,6 +270,7 @@
             <span class="tag">💚 社会公益</span>
             <span class="tag">🤖 AI人工智能</span>
             <span class="tag">📊 大数据分析</span>
+            <span class="tag">🧪 模拟演示数据</span>
         </div>
     </div>
 
@@ -278,13 +279,13 @@
         <div class="features-grid">
             <div class="feature-card">
                 <div class="icon">🔍</div>
-                <h3>多平台数据采集</h3>
-                <p>支持微博、知乎、豆瓣等主流社交媒体的数据爬取，实时监控全网舆情动态</p>
+                <h3>可审计的数据接入</h3>
+                <p>提供可选采集适配器与本地数据路径；默认演示数据明确标注为模拟数据，不宣称实时覆盖全网</p>
             </div>
             <div class="feature-card">
                 <div class="icon">😊</div>
                 <h3>情感智能分析</h3>
-                <p>基于TextCNN深度学习模型，自动识别文本情感倾向（正面/负面），准确率达90%+</p>
+                <p>基于 TextCNN 识别正负情感；指标由固定种子下的离线留出集报告提供，不预设或虚构准确率</p>
             </div>
             <div class="feature-card">
                 <div class="icon">🏷️</div>
@@ -293,13 +294,13 @@
             </div>
             <div class="feature-card">
                 <div class="icon">🦠</div>
-                <h3>SIR传播预测</h3>
-                <p>基于传染病模型的舆论传播预测，提前预警话题爆发趋势和峰值时间</p>
+                <h3>SIR传播情景模拟</h3>
+                <p>用有边界的 SIR 参数展示讨论量传播情景；结果不代表真实用户规模或因果预测</p>
             </div>
             <div class="feature-card">
                 <div class="icon">📈</div>
                 <h3>ARIMA趋势预测</h3>
-                <p>时间序列模型预测未来热度走势，提供7天置信区间预测，辅助决策</p>
+                <p>在观测点充足时对当前本地序列进行统计外推并展示95%区间；数据不足时明确拒绝预测</p>
             </div>
             <div class="feature-card">
                 <div class="icon">⚠️</div>
@@ -333,7 +334,7 @@
                 <ul>
                     <li>TextCNN（情感分类）</li>
                     <li>LDA（主题发现）</li>
-                    <li>SIR（传播预测）</li>
+                            <li>SIR（传播情景模拟）</li>
                     <li>ARIMA（趋势预测）</li>
                 </ul>
             </div>
@@ -401,7 +402,7 @@
                 <div class="demo-chart" id="sentimentTrend"></div>
             </div>
             <div class="demo-box">
-                <h4>🦠 SIR 传播预测模型</h4>
+                    <h4>🦠 SIR 传播情景模拟</h4>
                 <div class="demo-chart" id="sirChart"></div>
             </div>
             <div class="demo-box">
@@ -429,9 +430,9 @@
     <div class="section">
         <div class="about-section">
             <h3>💡 创意说明</h3>
-            <p><strong>问题痛点：</strong>当前社交媒体信息爆炸，用户难以快速把握舆论走向，政府和企业也缺乏有效的舆情监测工具来提前预警和应对热点事件。传统舆情分析依赖人工，效率低、反应慢，往往在事件爆发后才被动应对。</p>
-            <p><strong>解决方案：</strong>本系统整合AI情感分析、主题发现、传播预测等核心能力，构建完整的大数据舆情监控平台。通过TextCNN实现情感智能分类，LDA自动发现热门话题，SIR和ARIMA模型预测传播趋势，帮助用户提前把握舆情走向。</p>
-            <p><strong>价值意义：</strong>从社会价值角度，系统帮助政府和相关部门及时发现潜在的社会风险，提前介入引导，维护网络空间的清朗和社会稳定。从效率提升角度，通过自动化的文本处理和预测模型，将分析效率提升数十倍，让舆情工作者聚焦于决策和应对。</p>
+            <p><strong>问题假设：</strong>学生和项目团队需要一个能把数据来源、文本处理、模型评估、趋势分析和可视化串联起来的可复现舆情原型。该需求目前由项目工作流支持，但尚未完成代表性真实用户研究。</p>
+            <p><strong>已实现方案：</strong>系统整合 TextCNN 情感分类、LDA 主题发现、SIR 传播情景模拟和 ARIMA 统计外推；筛选、错误状态、数据来源和离线评估均提供可检查的 API 或仓库证据。</p>
+            <p><strong>已验证价值：</strong>固定 API 合约测试可复现筛选一致性、参数边界和无数据安全失败。真实业务效果、跨平台准确率、决策收益与社会影响仍属未知，下一步需要合规的目标场景数据和代表性用户任务测试。</p>
         </div>
     </div>
 

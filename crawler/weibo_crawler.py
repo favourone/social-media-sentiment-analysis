@@ -58,6 +58,7 @@ class WeiboCrawler:
                     'hot_value': item.get('num', 0),
                     'category': item.get('category', ''),
                     'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'data_kind': 'observed_api_response',
                 })
             print(f"   获取到 {len(hot_list)} 条热搜")
             return hot_list
@@ -91,6 +92,7 @@ class WeiboCrawler:
                             'created_at': mblog.get('created_at', ''),
                             'source': '微博',
                             'topic': keyword,
+                            'data_kind': 'observed_api_response',
                         })
                 print(f"   第{page}页：获取 {len(posts)} 条")
                 time.sleep(config.CRAWLER_DELAY)
@@ -114,6 +116,9 @@ class WeiboCrawler:
             {"rank": 4, "keyword": "房价最新政策", "hot_value": 654321},
             {"rank": 5, "keyword": "世界杯预选赛", "hot_value": 543210},
         ]
+        for item in mock_data:
+            item['data_kind'] = 'synthetic_fallback'
+            item['source'] = '内置演示数据'
         print(f"   使用模拟热搜数据（{len(mock_data)} 条）")
         return mock_data
 

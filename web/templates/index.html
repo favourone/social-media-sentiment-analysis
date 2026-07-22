@@ -105,6 +105,25 @@
             transform: translateY(-1px);
             box-shadow: 0 4px 15px rgba(0,180,255,0.3);
         }
+        .provenance-bar {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            min-height: 34px;
+            padding: 6px 20px;
+            color: rgba(255,255,255,0.72);
+            background: rgba(255, 187, 0, 0.08);
+            border-bottom: 1px solid rgba(255, 187, 0, 0.22);
+            font-size: 12px;
+        }
+        .provenance-badge {
+            color: #07111f;
+            background: #ffd666;
+            border-radius: 999px;
+            padding: 3px 10px;
+            font-weight: 700;
+        }
 
         .stats-row {
             display: flex;
@@ -386,6 +405,11 @@
         </div>
     </div>
 
+    <div class="provenance-bar" id="provenanceBar" role="status" aria-live="polite">
+        <span class="provenance-badge">数据来源核验中</span>
+        <span>模型结果只适用于当前标注的数据条件</span>
+    </div>
+
     <div class="stats-row">
         <div class="stat-card">
             <div class="label">📊 帖子总量</div>
@@ -419,7 +443,7 @@
             <div class="chart-container" id="sentimentTrend"></div>
         </div>
         <div class="chart-box">
-            <div class="title"><span class="icon">🦠</span> SIR 传播预测模型</div>
+            <div class="title"><span class="icon">🦠</span> SIR 传播情景模拟</div>
             <div class="chart-container" id="sirChart"></div>
         </div>
         <div class="chart-box">
@@ -456,6 +480,24 @@ let currentFilters = {
     endDate: ''
 };
 
+function escapeHTML(value) {
+    const node = document.createElement('span');
+    node.textContent = String(value ?? '');
+    return node.innerHTML;
+}
+
+function chartInstance(id) {
+    const element = document.getElementById(id);
+    return echarts.getInstanceByDom(element) || echarts.init(element);
+}
+
+function showChartMessage(id, message) {
+    const chart = echarts.getInstanceByDom(document.getElementById(id));
+    if (chart) chart.dispose();
+    document.getElementById(id).innerHTML =
+        `<div style="display:flex;height:100%;align-items:center;justify-content:center;color:rgba(255,255,255,.55);padding:20px;text-align:center">${escapeHTML(message)}</div>`;
+}
+
 function buildQueryString(params) {
     const query = [];
     if (params.topic && params.topic !== 'all') query.push(`topic=${encodeURIComponent(params.topic)}`);
@@ -467,11 +509,36 @@ function buildQueryString(params) {
 async function fetchJSON(url) {
     try {
         const resp = await fetch(API_BASE + url);
-        return await resp.json();
+        const data = await resp.json();
+        if (!resp.ok) {
+            console.warn('API返回可处理错误:', url, data);
+            return null;
+        }
+        return data;
     } catch (e) {
         console.error('API请求失败:', url, e);
         return null;
     }
+}
+
+async function loadDataStatus() {
+    const data = await fetchJSON('/api/data_status');
+    if (!data) return;
+    const provenance = data.provenance || {};
+    const labels = {
+        synthetic: '模拟数据',
+        derived_public_corpus_with_synthetic_metadata: '公开语料派生数据',
+        mixed_derived_and_synthetic: '混合派生/模拟数据',
+        unknown: '来源未知'
+    };
+    const label = labels[provenance.dataset_type] || provenance.dataset_type || '来源未知';
+    const evidence = provenance.evidence_status === 'verified' ? '已核验清单' : '仅推断';
+    const range = data.date_range?.start && data.date_range?.end
+        ? `${data.date_range.start} 至 ${data.date_range.end}` : '无可用日期';
+    document.getElementById('provenanceBar').innerHTML = `
+        <span class="provenance-badge">${escapeHTML(label)} · ${escapeHTML(evidence)}</span>
+        <span>${Number(data.counts?.posts || 0).toLocaleString()} 条帖子 · ${escapeHTML(range)}；不得外推为未测试的真实场景效果</span>
+    `;
 }
 
 function updateTime() {
@@ -491,8 +558,8 @@ async function loadTopicsList() {
     const data = await fetchJSON('/api/topics');
     if (!data) return;
     const select = document.getElementById('topicSelect');
-    select.innerHTML = '<option value="all">全部话题</option>' +
-        data.map(t => `<option value="${t}">${t}</option>`).join('');
+    select.replaceChildren(new Option('全部话题', 'all'));
+    data.forEach(topic => select.add(new Option(topic, topic)));
 }
 
 function applyFilter() {
@@ -528,7 +595,7 @@ async function loadWordCloud() {
     const data = await fetchJSON('/api/word_freq' + query);
     if (!data) return;
 
-    const chart = echarts.init(document.getElementById('wordCloud'));
+    const chart = chartInstance('wordCloud');
     chart.setOption({
         backgroundColor: 'transparent',
         series: [{
@@ -567,7 +634,7 @@ async function loadSentimentTrend() {
     const data = await fetchJSON('/api/sentiment_trend' + query);
     if (!data) return;
 
-    const chart = echarts.init(document.getElementById('sentimentTrend'));
+    const chart = chartInstance('sentimentTrend');
     chart.setOption({
         backgroundColor: 'transparent',
         tooltip: { 
@@ -632,9 +699,12 @@ async function loadSIR() {
     const topic = currentFilters.topic === 'all' ? 'AI人工智能' : currentFilters.topic;
     const query = buildQueryString({ ...currentFilters, topic });
     const data = await fetchJSON('/api/sir_prediction' + query);
-    if (!data) return;
+    if (!data) {
+        showChartMessage('sirChart', '当前筛选范围数据不足，未生成 SIR 情景模拟');
+        return;
+    }
 
-    const chart = echarts.init(document.getElementById('sirChart'));
+    const chart = chartInstance('sirChart');
     const time = data.time.map(t => t.toFixed(1));
 
     chart.setOption({
@@ -717,7 +787,9 @@ async function loadSIR() {
         ]
     });
     
+    document.querySelector('.sir-model-note')?.remove();
     const infoDiv = document.createElement('div');
+    infoDiv.className = 'sir-model-note';
     infoDiv.style.cssText = `
         position: absolute; bottom: 15px; right: 15px;
         font-size: 12px; color: rgba(255,255,255,0.7);
@@ -728,6 +800,8 @@ async function loadSIR() {
         <div><span style="color:#ffd700">R₀:</span> ${data.R0}</div>
         <div><span style="color:#ff4d4f">峰值:</span> 第${Math.round(data.peak_day)}天</div>
         <div><span style="color:#${data.risk_level === '高' ? 'ff4d4f' : data.risk_level === '中' ? 'ffd700' : '00ff88'}">风险:</span> ${data.risk_level}</div>
+        <div><span style="color:#ffd666">拟合 NRMSE:</span> ${Number(data.fit_nrmse).toFixed(3)}</div>
+        <div style="max-width:220px;margin-top:4px;color:rgba(255,255,255,.5)">${escapeHTML(data.claim_scope)}</div>
     `;
     document.getElementById('sirChart').parentElement.appendChild(infoDiv);
 
@@ -738,9 +812,12 @@ async function loadARIMA() {
     const topic = currentFilters.topic === 'all' ? 'AI人工智能' : currentFilters.topic;
     const query = buildQueryString({ ...currentFilters, topic });
     const data = await fetchJSON('/api/arima_prediction' + query);
-    if (!data) return;
+    if (!data) {
+        showChartMessage('arimaChart', '当前筛选范围数据不足，未生成 ARIMA 预测');
+        return;
+    }
 
-    const chart = echarts.init(document.getElementById('arimaChart'));
+    const chart = chartInstance('arimaChart');
     const allDates = [...data.history_dates];
     const forecastDates = [];
     if (data.history_dates.length > 0) {
@@ -758,13 +835,14 @@ async function loadARIMA() {
     forecastLine.push(data.history_values[data.history_values.length - 1]);
     forecastLine.push(...data.forecast);
 
-    const upperLine = new Array(data.history_dates.length - 1).fill(null);
-    upperLine.push(data.history_values[data.history_values.length - 1]);
-    upperLine.push(...data.upper_bound);
-
     const lowerLine = new Array(data.history_dates.length - 1).fill(null);
     lowerLine.push(data.history_values[data.history_values.length - 1]);
     lowerLine.push(...data.lower_bound);
+
+    const confidenceBand = new Array(data.history_dates.length - 1).fill(null);
+    confidenceBand.push(0);
+    confidenceBand.push(...data.upper_bound.map((upper, index) =>
+        Math.max(0, upper - data.lower_bound[index])));
 
     chart.setOption({
         backgroundColor: 'transparent',
@@ -809,32 +887,31 @@ async function loadARIMA() {
                 symbolSize: 8,
             },
             {
-                name: '上界', type: 'line', smooth: true,
-                data: upperLine, 
+                name: '置信下界', type: 'line', smooth: true,
+                data: lowerLine,
                 lineStyle: { opacity: 0 },
-                areaStyle: { 
-                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                        { offset: 0, color: 'rgba(250,173,20,0.25)' },
-                        { offset: 1, color: 'rgba(250,173,20,0.02)' }
-                    ])
-                },
-                stack: 'confidence', 
+                stack: 'confidence-band',
                 showSymbol: false
             },
             {
                 name: '95%置信区间', type: 'line', smooth: true,
-                data: lowerLine,
+                data: confidenceBand,
                 lineStyle: { opacity: 0 },
                 areaStyle: { 
-                    color: 'rgba(250,173,20,0.05)'
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: 'rgba(250,173,20,0.25)' },
+                        { offset: 1, color: 'rgba(250,173,20,0.05)' }
+                    ])
                 },
-                stack: 'confidence', 
+                stack: 'confidence-band',
                 showSymbol: false
             }
         ]
     });
 
+    document.querySelector('.arima-model-note')?.remove();
     const infoDiv = document.createElement('div');
+    infoDiv.className = 'arima-model-note';
     infoDiv.style.cssText = `
         position: absolute; bottom: 15px; right: 15px;
         font-size: 12px; color: rgba(255,255,255,0.7);
@@ -845,6 +922,8 @@ async function loadARIMA() {
     infoDiv.innerHTML = `
         <div><span style="color:${trendColor}">趋势:</span> ${data.trend}</div>
         <div><span style="color:#ffd700">变化率:</span> ${data.change_rate > 0 ? '+' : ''}${data.change_rate}%</div>
+        <div><span style="color:${data.converged === false ? '#ff4d4f' : '#00ff88'}">拟合:</span> ${data.converged === false ? '未收敛' : '已收敛'}</div>
+        <div style="max-width:220px;margin-top:4px;color:rgba(255,255,255,.5)">${escapeHTML(data.claim_scope)}</div>
     `;
     document.getElementById('arimaChart').parentElement.appendChild(infoDiv);
 
@@ -857,13 +936,17 @@ async function loadTopics() {
     if (!data) return;
 
     const container = document.getElementById('topicList');
+    if (data.length === 0) {
+        container.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.4);padding:40px">当前筛选范围无话题</div>';
+        return;
+    }
     const maxCount = Math.max(...data.map(d => d.count));
 
     container.innerHTML = data.map((t, i) => `
         <div class="topic-item">
             <div style="flex:1">
                 <span class="rank">${i+1}</span>
-                <span>${t.topic}</span>
+                <span>${escapeHTML(t.topic)}</span>
                 <div class="bar" style="width:${(t.count/maxCount*100).toFixed(0)}%"></div>
             </div>
             <div style="text-align:right;margin-left:15px">
@@ -887,7 +970,7 @@ async function loadModelMetrics() {
         if (data.error) {
             container.innerHTML = `<div style="text-align:center;color:#ff4d4f;padding:20px">
                 <div style="font-size:14px;margin-bottom:5px">❌ 模型评估失败</div>
-                <div style="font-size:12px;color:rgba(255,255,255,0.5)">${data.message || data.error}</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.5)">${escapeHTML(data.message || data.error)}</div>
             </div>`;
             return;
         }
@@ -920,13 +1003,18 @@ async function loadModelMetrics() {
                     <div class="value blue">${data.loss.toFixed(4)}</div>
                 </div>
             </div>
+            <div style="font-size:11px;color:rgba(255,255,255,.48);margin-top:8px;line-height:1.5">
+                离线留出集：${Number(data.sample_sizes?.test || 0).toLocaleString()} 条；
+                数据类型：${escapeHTML(data.dataset_type || 'unknown')}；
+                随机种子：${escapeHTML(data.random_seed)}
+            </div>
             <div style="height:150px;margin-top:10px">
                 <div id="lossChart"></div>
             </div>
         `;
 
         setTimeout(() => {
-            const chart = echarts.init(document.getElementById('lossChart'));
+            const chart = chartInstance('lossChart');
             const epochs = Array.from({length: data.epochs}, (_, i) => i+1);
             chart.setOption({
                 backgroundColor: 'transparent',
@@ -959,17 +1047,24 @@ async function loadAlerts() {
     }
 
     container.innerHTML = data.map(a => `
-        <div class="alert-item ${a.level}">
+        <div class="alert-item ${a.level === 'high' ? 'high' : 'medium'}">
             <span class="badge">${a.level === 'high' ? '🔴 高危' : '🟡 中危'}</span>
-            <span>${a.message}</span>
+            <span>${escapeHTML(a.message)}</span>
         </div>
     `).join('');
 }
 
 async function init() {
-    await loadTopicsList();
+    await Promise.all([loadTopicsList(), loadDataStatus()]);
+    if (typeof echarts === 'undefined') {
+        document.getElementById('provenanceBar').innerHTML = `
+            <span class="provenance-badge">图表资源未加载</span>
+            <span>请检查网络或部署本地 ECharts 资源；统计 API 仍可使用</span>`;
+        await loadOverview();
+        return;
+    }
     
-    await Promise.all([
+    await Promise.allSettled([
         loadOverview(),
         loadWordCloud(),
         loadSentimentTrend(),
