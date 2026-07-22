@@ -7,22 +7,48 @@ Flask Web 应用
 """
 
 import os
+import secrets
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, redirect, session, url_for
 from flask_cors import CORS
 
 app = Flask(__name__)
+app.secret_key = config.APP_SECRET_KEY or secrets.token_hex(32)
+app.permanent_session_lifetime = timedelta(hours=config.SESSION_HOURS)
+app.config.update(
+    MAX_CONTENT_LENGTH=config.MAX_UPLOAD_BYTES,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', '').lower()
+    in {'1', 'true', 'yes', 'on'},
+)
 if hasattr(app, 'json'):
     app.json.ensure_ascii = False
 else:
     app.config['JSON_AS_ASCII'] = False
 if config.CORS_ORIGINS:
     CORS(app, resources={r"/api/*": {"origins": config.CORS_ORIGINS}})
+
+from web.product_api import register_product_routes
+register_product_routes(app)
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    response.headers.setdefault(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+    )
+    return response
 
 
 def api_error(code, message, status, **details):
@@ -149,6 +175,16 @@ def filter_comments(comments, allowed_post_ids, start_date=None, end_date=None):
 @app.route('/')
 def index():
     """舆情监控大屏首页"""
+    if not session.get('admin_id'):
+        return redirect(url_for('product.login_page'))
+    return render_template('index.html')
+
+
+@app.route('/dashboard')
+def dashboard():
+    """Authenticated legacy visualization dashboard."""
+    if not session.get('admin_id'):
+        return redirect(url_for('product.login_page'))
     return render_template('index.html')
 
 
