@@ -179,6 +179,10 @@ class TextCNNModel:
             print("⚠️  PyTorch 未安装")
             return None
 
+        torch.manual_seed(config.RANDOM_SEED)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(config.RANDOM_SEED)
+
         # 自动选择设备
         if torch.cuda.is_available():
             self.device = torch.device('cuda')
@@ -223,7 +227,8 @@ class TextCNNModel:
         train_loader = DataLoader(
             train_dataset,
             batch_size=config.TEXTCNN_BATCH_SIZE,
-            shuffle=True
+            shuffle=True,
+            generator=torch.Generator().manual_seed(config.RANDOM_SEED),
         )
 
         # 验证集
@@ -242,7 +247,8 @@ class TextCNNModel:
         criterion = nn.CrossEntropyLoss()
 
         # 训练循环
-        best_val_acc = 0
+        best_val_acc = float('-inf')
+        best_checkpoint_saved = False
         patience = 3
         patience_counter = 0
 
@@ -278,13 +284,18 @@ class TextCNNModel:
 
             # ---- 验证阶段 ----
             val_acc = 0
+            val_loss = None
             if val_loader:
-                val_acc = self._evaluate(val_loader)
+                val_metrics = self._evaluate(val_loader, criterion)
+                val_acc = val_metrics['accuracy']
+                val_loss = val_metrics['loss']
 
             # 记录历史
             self.history.append({
                 'epoch': epoch + 1,
                 'loss': avg_loss,
+                'train_loss': avg_loss,
+                'val_loss': val_loss,
                 'train_acc': train_acc,
                 'val_acc': val_acc,
             })
@@ -302,35 +313,44 @@ class TextCNNModel:
                 patience_counter = 0
                 # 保存最佳模型
                 self._save_checkpoint('textcnn_best.pt')
-            else:
+                best_checkpoint_saved = True
+            elif val_loader:
                 patience_counter += 1
                 if patience_counter >= patience:
                     print(f"   Early stopping at epoch {epoch+1}")
                     break
 
-        print(f"\n   ✅ 训练完成！最佳验证准确率: {best_val_acc:.4f}")
+        best_text = f'{best_val_acc:.4f}' if val_loader else '未提供验证集'
+        print(f"\n   ✅ 训练完成！最佳验证准确率: {best_text}")
 
         # 加载最佳模型
-        self._load_checkpoint('textcnn_best.pt')
+        if best_checkpoint_saved:
+            self._load_checkpoint('textcnn_best.pt')
 
         return self.history
 
-    def _evaluate(self, data_loader):
-        """评估模型"""
+    def _evaluate(self, data_loader, criterion=None):
+        """计算验证准确率和真实验证损失。"""
         self.model.eval()
         correct = 0
         total = 0
+        total_loss = 0.0
+        criterion = criterion or nn.CrossEntropyLoss()
 
         with torch.no_grad():
             for batch_X, batch_y in data_loader:
                 batch_X = batch_X.to(self.device)
                 batch_y = batch_y.to(self.device)
                 outputs = self.model(batch_X)
+                total_loss += criterion(outputs, batch_y).item()
                 _, predicted = torch.max(outputs, 1)
                 total += batch_y.size(0)
                 correct += (predicted == batch_y).sum().item()
 
-        return correct / total
+        return {
+            'accuracy': correct / total if total else 0.0,
+            'loss': total_loss / len(data_loader) if len(data_loader) else 0.0,
+        }
 
     def predict(self, texts_sequences):
         """
