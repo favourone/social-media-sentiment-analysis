@@ -30,9 +30,13 @@ class MongoStorage:
         self.client = None
         self.db = None
         self._connected = False
+        self._connect_attempted = False
 
     def connect(self):
         """建立 MongoDB 连接"""
+        self._connect_attempted = True
+        if not config.MONGO_ENABLED:
+            return False
         if not HAS_MONGO:
             print("⚠️  pymongo 未安装，将使用本地JSON文件存储")
             return False
@@ -40,7 +44,7 @@ class MongoStorage:
             self.client = MongoClient(
                 config.MONGO_HOST,
                 config.MONGO_PORT,
-                serverSelectionTimeoutMS=3000
+                serverSelectionTimeoutMS=config.MONGO_CONNECT_TIMEOUT_MS
             )
             self.db = self.client[config.MONGO_DB]
             # 测试连接
@@ -139,6 +143,64 @@ class MongoStorage:
             return list(self.posts.find().limit(limit))
         return self._load_from_json('posts.json')[:limit]
 
+    def get_all_comments(self, limit=1000000):
+        """获取所有评论。"""
+        if self._connected:
+            return list(self.comments.find().limit(limit))
+        return self._load_from_json('comments.json')[:limit]
+
+    def get_time_series(self, topic=None):
+        """获取话题时间序列。"""
+        filters = {'topic': topic} if topic and topic != 'all' else {}
+        return self._load_from_json('time_series.json', **filters)
+
+    def get_data_metadata(self, posts=None):
+        """读取数据来源清单；缺失时只返回有边界的推断。"""
+        if os.path.exists(config.DATASET_METADATA_PATH):
+            try:
+                with open(config.DATASET_METADATA_PATH, 'r', encoding='utf-8') as f:
+                    metadata = json.load(f)
+                if not isinstance(metadata, dict) or not metadata.get('dataset_type'):
+                    raise ValueError('metadata.json 缺少 dataset_type')
+                metadata.setdefault('evidence_status', 'verified')
+                return metadata
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                return {
+                    'schema_version': 1,
+                    'dataset_type': 'unknown',
+                    'evidence_status': 'rejected',
+                    'limitations': [f'数据来源清单不可用：{exc}'],
+                }
+
+        sample = posts if posts is not None else self.get_all_posts(limit=1000)
+        identifiers = [str(item.get('post_id', '')) for item in sample]
+        looks_synthetic = bool(identifiers) and all(
+            identifier.startswith(('post_', 'sim_')) for identifier in identifiers
+        )
+        return {
+            'schema_version': 1,
+            'dataset_type': 'synthetic' if looks_synthetic else 'unknown',
+            'evidence_status': 'inferred' if looks_synthetic else 'unknown',
+            'generator': None,
+            'generated_at': None,
+            'seed': None,
+            'limitations': [
+                '缺少 data/raw/metadata.json，来源类型仅由本地记录格式推断。',
+                '不得把本地演示结果外推为真实社交媒体效果。',
+            ],
+        }
+
+    def get_model_metrics(self):
+        """读取流水线生成的离线模型评估报告。"""
+        if not os.path.exists(config.MODEL_METRICS_PATH):
+            return None
+        try:
+            with open(config.MODEL_METRICS_PATH, 'r', encoding='utf-8') as f:
+                report = json.load(f)
+            return report if isinstance(report, dict) else None
+        except (OSError, json.JSONDecodeError):
+            return None
+
     def get_topic_stats(self):
         """获取各话题的统计数据"""
         if self._connected:
@@ -226,6 +288,6 @@ db = MongoStorage()
 
 def get_db():
     """获取数据库实例"""
-    if not db._connected:
+    if not db._connected and not db._connect_attempted:
         db.connect()
     return db

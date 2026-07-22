@@ -1,38 +1,24 @@
-# ============================================================
-# 社交媒体舆情分析与热点事件预测系统 - 依赖清单
-# ============================================================
+# Runtime dependencies actually imported by the project.
 
-# 数据采集
-requests>=2.28.0
-beautifulsoup4>=4.11.0
-lxml>=4.9.0
+# Optional data collection
+requests>=2.28,<3
+beautifulsoup4>=4.11,<5
+lxml>=4.9
 
-# 数据存储
-pymongo>=4.3.0
-redis>=4.5.0
+# Optional MongoDB backend (local JSON is the default)
+pymongo>=4.3,<5
 
-# 数据处理 & NLP
-jieba>=0.42.1
-pandas>=1.5.0
-numpy>=1.23.0
-scikit-learn>=1.2.0
-gensim>=4.3.0
+# NLP and evaluation
+jieba>=0.42.1,<1
+numpy>=1.23
+scikit-learn>=1.2
+gensim>=4.3,<5
 
-# 深度学习 - TextCNN (PyTorch)
-torch>=2.0.0
+# Models
+torch>=2.0
+statsmodels>=0.14,<1
+scipy>=1.10
 
-# 统计模型 - ARIMA / SIR
-statsmodels>=0.14.0
-scipy>=1.10.0
-
-# Web应用
-flask>=2.3.0
-flask-cors>=4.0.0
-
-# 可视化
-pyecharts>=2.0.0
-matplotlib>=3.7.0
-wordcloud>=1.9.0
-
-# 工具
-tqdm>=4.65.0
+# Web API
+Flask>=2.3,<4
+Flask-Cors>=4,<7

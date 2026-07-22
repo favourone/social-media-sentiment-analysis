@@ -15,6 +15,7 @@ import os
 import sys
 import json
 import time
+from datetime import datetime, timezone
 
 # Windows 终端 UTF-8 编码修复
 if sys.platform == 'win32':
@@ -81,7 +82,102 @@ def step2_text_processing(posts):
     return processor, tokenized, vocab
 
 
-def step3_train_textcnn(posts, processor):
+def prepare_textcnn_data(posts, random_state=None):
+    """Split raw text first, then build a vocabulary from training text only."""
+    from sklearn.model_selection import train_test_split
+    import numpy as np
+    from processing.text_processor import TextProcessor
+
+    random_state = config.RANDOM_SEED if random_state is None else random_state
+    texts = [post.get('text', '') for post in posts]
+    labels = np.array([post.get('sentiment', 0) for post in posts])
+    if len(texts) < 100:
+        raise ValueError('TextCNN 评估至少需要 100 条数据')
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    if len(unique_labels) < 2 or np.min(counts) < 3:
+        raise ValueError('每个情感类别至少需要 3 条数据')
+
+    train_texts, test_texts, y_train, y_test = train_test_split(
+        texts,
+        labels,
+        test_size=0.2,
+        random_state=random_state,
+        stratify=labels,
+    )
+    train_texts, val_texts, y_train, y_val = train_test_split(
+        train_texts,
+        y_train,
+        test_size=0.1,
+        random_state=random_state,
+        stratify=y_train,
+    )
+
+    processor = TextProcessor()
+    processor.build_vocab(train_texts)
+    return {
+        'processor': processor,
+        'train_texts': train_texts,
+        'val_texts': val_texts,
+        'test_texts': test_texts,
+        'X_train': np.array(processor.texts_to_sequences(train_texts)),
+        'X_val': np.array(processor.texts_to_sequences(val_texts)),
+        'X_test': np.array(processor.texts_to_sequences(test_texts)),
+        'y_train': np.array(y_train),
+        'y_val': np.array(y_val),
+        'y_test': np.array(y_test),
+    }
+
+
+def save_model_metrics_report(
+    metrics, history, y_test, predicted_labels, sample_sizes, posts=None
+):
+    """Persist an auditable offline evaluation report for the read-only API."""
+    from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
+
+    metadata = {}
+    if os.path.exists(config.DATASET_METADATA_PATH):
+        with open(config.DATASET_METADATA_PATH, 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
+    elif posts:
+        identifiers = [str(post.get('post_id', '')) for post in posts]
+        if identifiers and all(item.startswith(('post_', 'sim_')) for item in identifiers):
+            metadata = {
+                'dataset_type': 'synthetic',
+                'evidence_status': 'inferred',
+            }
+
+    report = {
+        'schema_version': 1,
+        'evaluation_type': 'offline_holdout',
+        'evaluated_at': datetime.now(timezone.utc).isoformat(),
+        'random_seed': config.RANDOM_SEED,
+        'dataset_type': metadata.get('dataset_type', 'unknown'),
+        'dataset_evidence_status': metadata.get('evidence_status', 'unknown'),
+        'sample_sizes': sample_sizes,
+        'accuracy': round(metrics['accuracy'], 4),
+        'loss': round(metrics['loss'], 4),
+        'precision': round(precision_score(y_test, predicted_labels, zero_division=0), 4),
+        'recall': round(recall_score(y_test, predicted_labels, zero_division=0), 4),
+        'f1_score': round(f1_score(y_test, predicted_labels, zero_division=0), 4),
+        'confusion_matrix': confusion_matrix(y_test, predicted_labels).tolist(),
+        'train_loss': [round(item['train_loss'], 4) for item in history],
+        'val_loss': [
+            round(item['val_loss'], 4) if item['val_loss'] is not None else None
+            for item in history
+        ],
+        'train_acc': [round(item['train_acc'], 4) for item in history],
+        'val_acc': [round(item['val_acc'], 4) for item in history],
+        'epochs': len(history),
+        'claim_scope': '仅描述固定随机种子下的本地留出集结果；模拟或派生数据不能证明真实社交媒体效果。',
+    }
+    os.makedirs(config.PROCESSED_DATA_DIR, exist_ok=True)
+    with open(config.MODEL_METRICS_PATH, 'w', encoding='utf-8') as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    print(f"   评估报告：{config.MODEL_METRICS_PATH}")
+    return report
+
+
+def step3_train_textcnn(posts, processor=None):
     """步骤3：训练 TextCNN 情感分类模型"""
     print("\n" + "=" * 60)
     print("  步骤 3/5：训练 TextCNN 情感分类模型")
@@ -89,42 +185,55 @@ def step3_train_textcnn(posts, processor):
 
     try:
         from models.textcnn import TextCNNModel
-        from sklearn.model_selection import train_test_split
-        import numpy as np
     except ImportError as e:
         print(f"   ⚠️  依赖缺失：{e}，跳过 TextCNN 训练")
         print("   提示：运行 pip install torch scikit-learn 安装依赖")
         return None
 
-    texts = [p.get('text', '') for p in posts]
-    labels = [p.get('sentiment', 0) for p in posts]
-
-    # 文本转序列
-    print("\n   [3.1] 文本转索引序列...")
-    sequences = processor.texts_to_sequences(texts)
-    X = np.array(sequences)
-    y = np.array(labels)
-    print(f"   数据形状：X={X.shape}, y={y.shape}")
-
-    # 划分训练/验证/测试集
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.1, random_state=42)
+    # 先拆分原始文本，随后只使用训练文本构建词表，防止测试集泄漏。
+    print("\n   [3.1] 分层拆分数据并由训练集构建词表...")
+    prepared = prepare_textcnn_data(posts)
+    processor = prepared['processor']
+    X_train, X_val, X_test = prepared['X_train'], prepared['X_val'], prepared['X_test']
+    y_train, y_val, y_test = prepared['y_train'], prepared['y_val'], prepared['y_test']
     print(f"   训练集：{len(X_train)}，验证集：{len(X_val)}，测试集：{len(X_test)}")
 
     # 构建模型
     print("\n   [3.2] 构建 TextCNN 模型...")
     model = TextCNNModel(vocab_size=len(processor.vocab))
-    model.build_model()
+    if model.build_model() is None:
+        print("   ⚠️  TextCNN 不可用，未生成评估报告")
+        return None
 
     # 训练
     print("\n   [3.3] 开始训练...")
-    model.train(X_train, y_train, X_val, y_val)
+    history = model.train(X_train, y_train, X_val, y_val)
 
     # 评估
     print("\n   [3.4] 模型评估...")
     metrics = model.evaluate(X_test, y_test)
+    if not metrics:
+        raise RuntimeError('TextCNN 测试集评估失败')
     print(f"   测试集准确率：{metrics['accuracy']:.4f}")
     print(f"   测试集损失：{metrics['loss']:.4f}")
+
+    predictions = model.predict(X_test)
+    if not predictions:
+        raise RuntimeError('TextCNN 测试集预测失败')
+    predicted_labels = [item['label'] for item in predictions]
+    save_model_metrics_report(
+        metrics,
+        history or [],
+        y_test,
+        predicted_labels,
+        {
+            'train': len(X_train),
+            'validation': len(X_val),
+            'test': len(X_test),
+            'total': len(posts),
+        },
+        posts=posts,
+    )
 
     # 保存模型
     model.save()
