@@ -1,0 +1,32 @@
+# GitHub Actions template.
+# Move this file to .github/workflows/ci.yml after authenticating with a token
+# that has GitHub's workflow permission.
+name: CI
+
+on:
+  push:
+    branches: [main, product/v1]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      APP_SECRET_KEY: ci-secret-only
+      ADMIN_PASSWORD: ci-password-not-for-deployment
+      TASK_QUEUE_MODE: inline
+      PRODUCT_DB_PATH: /tmp/sentiment-ci.db
+      REPORT_DIR: /tmp/sentiment-reports
+      IMPORT_DIR: /tmp/sentiment-imports
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements.lock coverage
+      - run: python -m coverage run --source=crawler.adapters,services,storage.product_store,web.product_api -m unittest discover -s tests -v
+      - run: python -m coverage report --fail-under=80
+      - run: python -m compileall -q .
