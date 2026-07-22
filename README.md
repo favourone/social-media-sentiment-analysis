@@ -1,146 +1,219 @@
-# 社交媒体舆情分析与热点事件预测系统
+# 社交媒体舆情分析与热点事件预测平台 V1
 
-这是一个用于教学、算法验证和演示的 Flask 舆情分析原型，包含文本处理、情感分类、主题发现、传播情景模拟、时间序列预测和可视化大屏。
+面向舆情分析人员的非商业教学与竞赛项目。系统把数据采集或导入、标准化去重、分析任务、风险预警、结果解释和 PDF/CSV 报告串成一条可追踪的工作流。
 
-> 当前默认数据是程序生成的模拟数据。项目不会把模拟指标表述为真实社交媒体效果；大屏会显示数据类型和证据状态。
+> 重要边界：系统不会在采集失败时自动填入模拟结果。词典情感、LDA、SIR 和 ARIMA 都是辅助分析方法，必须结合原文、样本范围和数据来源人工复核。
 
-## 解决的问题
+## 已完成的产品闭环
 
-目标用户是需要快速演示舆情分析流程的学生和项目团队。系统把以下路径整合为一个可运行原型：
+- 单管理员登录、密码哈希、CSRF 防护、会话过期和登录限流；
+- SQLite 正式业务存储，WAL、事务和“平台 + 原始 ID”唯一约束；
+- `pending / running / paused / succeeded / failed / cancelled` 统一任务状态；
+- JSON、JSONL、CSV 安全导入和外部 MediaCrawler 微博适配器；
+- 摘要、词频、LDA、ARIMA、SIR 和已有大屏分析能力；
+- 带样本量、来源和解释边界的预警、PDF 报告与 CSV 明细；
+- Docker Compose 的 Web、RQ Worker、Redis 和持久卷；
+- 健康检查、自动化测试、CI 和证据文档。
 
-`数据准备 → 文本清洗/分词 → 模型训练与离线评估 → 聚合/预测 API → Web 大屏`
+## 使用 Conda `cv` 环境运行（推荐）
 
-本轮改进优先解决了四个会破坏演示可信度的问题：
+本项目已经按你的环境验证。`requirements.lock` 保存了本次通过测试的直接依赖版本，`requirements.txt` 保留兼容版本范围：
 
-- 日期/话题筛选后，评论数曾错误地保留为全量；
-- 非法预测参数曾返回 500，未知话题曾静默替换为内置曲线；
-- 模型指标曾在 GET 请求中现场训练并写入模型文件；
-- 词表曾在数据拆分前用全部文本构建，形成测试集信息泄漏。
-
-基线、验收门槛、方案排序和验证记录位于 [`docs/evidence/`](docs/evidence/)。
-
-## 快速开始
-
-推荐 Python 3.9 及以上版本：
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-python -m pip install -r requirements.txt
+```text
+D:\an\envs\cv\python.exe
+Python 3.10.20
 ```
 
-生成可复现的模拟数据：
+在 Anaconda Prompt 或 PowerShell 中执行：
 
-```bash
-python scripts/generate_data.py --seed 42 --reference-time 2026-07-01T12:00:00
+```powershell
+conda activate cv
+cd "D:\智能科学与技术\人工智能与大数据应用创新2-校"
+python -m pip install -r requirements.lock
+Copy-Item .env.example .env
+python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-该命令同时写入 `data/raw/metadata.json`，记录生成器、随机种子、参考时间、规模和使用限制。`data/` 被 Git 忽略，不会误提交数据集。
+编辑 `.env`，至少替换以下两项：
 
-运行完整流水线：
-
-```bash
-python scripts/run_pipeline.py
+```dotenv
+APP_SECRET_KEY=刚才生成的随机字符串
+ADMIN_PASSWORD=你自己的强密码，至少10位
 ```
 
-流水线会：
+本地调试保持：
 
-1. 加载或生成数据；
-2. 执行 jieba 分词、词频和 TF-IDF；
-3. 先拆分原始文本，再仅用训练集建立 TextCNN 词表；
-4. 用固定种子和分层拆分训练，在独立测试集计算 Accuracy、Precision、Recall、F1、损失和混淆矩阵；
-5. 把只读评估报告写入 `data/processed/model_metrics.json`；
-6. 运行 LDA、SIR 情景分析、ARIMA 预测，并按需导入 MongoDB。
+```dotenv
+TASK_QUEUE_MODE=inline
+COLLECTOR_LICENSE_ACCEPTED=false
+```
 
-启动大屏：
+启动：
 
-```bash
+```powershell
 python -m web
 ```
 
-访问 <http://localhost:5000>。
+然后访问 <http://127.0.0.1:5000>，使用 `.env` 中的 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 登录。工作台地址是 <http://127.0.0.1:5000/workspace>，原分析大屏是 <http://127.0.0.1:5000/dashboard>。
+
+如果不想激活环境，也可以直接运行：
+
+```powershell
+& "D:\an\envs\cv\python.exe" -m web
+```
+
+## 首次体验流程
+
+1. 登录工作台，进入“数据采集”。
+2. 先上传 JSON、JSONL 或 CSV 文件验证完整闭环；单文件最大 10 MB。
+3. 进入“分析任务”，选择“完整分析”。
+4. 在“预警中心”查看达到阈值的话题，并回到原文人工复核。
+5. 在“报告中心”生成 PDF 报告或 CSV 明细。
+
+导入记录至少需要正文，推荐字段如下：
+
+```json
+[
+  {
+    "id": "wb-001",
+    "text": "帖子正文",
+    "author": "公开昵称",
+    "created_at": "2026-07-22 10:30:00",
+    "likes": 12,
+    "comments": 3,
+    "reposts": 1,
+    "source_url": "https://weibo.com/example/wb-001"
+  }
+]
+```
+
+`id` 也可写成 `post_id` 或 `source_id`；正文可写成 `text`、`content` 或 `desc`。缺少 ID 时系统使用正文与时间生成稳定哈希，缺少正文的记录会被拒绝并计入任务统计。
+
+## 微博采集器
+
+项目选择高关注的 [MediaCrawler](https://github.com/NanmiCoder/MediaCrawler) 作为外部适配对象，并固定到提交 [`0625e01a6bc717a3fc9c96d3dac7fb8957043838`](https://github.com/NanmiCoder/MediaCrawler/commit/0625e01a6bc717a3fc9c96d3dac7fb8957043838)。它不被复制进本仓库，也不会随主项目自动安装。
+
+其许可证限定非商业学习研究，且要求遵守平台条款、控制频率、禁止大规模采集。请先完整阅读 [NON-COMMERCIAL LEARNING LICENSE](https://github.com/NanmiCoder/MediaCrawler/blob/main/LICENSE)。只有接受这些条件后才运行：
+
+```powershell
+conda activate cv
+cd "D:\智能科学与技术\人工智能与大数据应用创新2-校"
+.\scripts\setup_mediacrawler.ps1 -AcceptNonCommercialLicense
+cd external\MediaCrawler
+uv sync
+cd ..\..
+```
+
+按照 MediaCrawler 官方说明启用 Chrome CDP 和扫码登录，再在 `.env` 中设置：
+
+```dotenv
+COLLECTOR_LICENSE_ACCEPTED=true
+MEDIACRAWLER_HOME=external/MediaCrawler
+MEDIACRAWLER_OUTPUT_DIR=external/MediaCrawler/data
+MEDIACRAWLER_COMMAND_JSON=["uv","run","main.py","--platform","wb","--lt","qrcode","--type","search"]
+```
+
+适配器只会临时改写外部项目的关键词、采集上限、输出格式和低并发设置，任务结束或失败时恢复原配置。遇到登录失效、验证码或权限限制时任务会进入 `paused`，不会绕过平台验证，也不会生成假数据。
+
+交互式扫码依赖本机浏览器，因此推荐在 Conda 本地模式中运行真实采集。Docker 部署默认支持文件导入、分析与报告；没有经过授权的 Cookie、登录状态或第三方代码不会打进镜像。
+
+## Docker 单机部署
+
+先创建并编辑 `.env`，务必使用非示例密钥和密码：
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build -d
+docker compose ps
+docker compose logs -f web worker
+```
+
+Compose 会把任务模式强制设为 `rq`，并启动：
+
+- `web`：Waitress 托管的 Flask 应用；
+- `worker`：单个 RQ Worker，串行执行耗时任务；
+- `redis`：队列服务和持久化队列元数据；
+- `app-runtime`：SQLite、导入文件和报告；
+- `redis-data`：Redis AOF 数据。
+
+健康检查：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:5000/api/v1/health/live
+Invoke-RestMethod http://127.0.0.1:5000/api/v1/health/ready
+```
+
+停止服务：
+
+```powershell
+docker compose down
+```
+
+不要执行 `docker compose down -v`，除非明确希望删除数据库、报告和队列数据。
+
+## API
+
+旧只读分析 API 保持兼容，例如 `/api/overview`、`/api/word_freq`、`/api/lda_topics`、`/api/sir_prediction` 和 `/api/arima_prediction`。
+
+新增接口使用统一格式：成功为 `{"ok": true, "data": ...}`，失败为 `{"ok": false, "error": {"code": ..., "message": ...}}`。
+
+| 接口 | 方法 | 认证 | 用途 |
+|---|---|---:|---|
+| `/api/v1/auth/login` | POST | 否 | 管理员登录 |
+| `/api/v1/auth/logout` | POST | 是 + CSRF | 退出登录 |
+| `/api/v1/auth/me` | GET | 是 | 当前账号和 CSRF token |
+| `/api/v1/auth/password` | POST | 是 + CSRF | 修改密码 |
+| `/api/v1/collection-jobs` | GET/POST | 是 | 采集任务列表与创建 |
+| `/api/v1/collection-jobs/{id}` | GET | 是 | 任务状态和统计 |
+| `/api/v1/collection-jobs/{id}/cancel` | POST | 是 + CSRF | 取消任务 |
+| `/api/v1/collection-jobs/{id}/retry` | POST | 是 + CSRF | 重试暂停或失败任务 |
+| `/api/v1/imports` | POST | 是 + CSRF | 上传 JSON/JSONL/CSV |
+| `/api/v1/analysis-jobs` | GET/POST | 是 | 创建与查看分析任务 |
+| `/api/v1/alerts` | GET | 是 | 查看可解释预警 |
+| `/api/v1/reports` | GET/POST | 是 | 创建与查看报告 |
+| `/api/v1/reports/{id}.pdf` | GET | 是 | 下载 PDF |
+| `/api/v1/reports/{id}.csv` | GET | 是 | 下载 CSV |
+| `/api/v1/health/live` | GET | 否 | 进程存活 |
+| `/api/v1/health/ready` | GET | 否 | 数据库、队列和生产配置就绪状态 |
 
 ## 测试
 
-```bash
+```powershell
+conda activate cv
 python -m unittest discover -s tests -v
 python -m compileall -q .
 ```
 
-测试使用临时夹具，不读取、覆盖或提交你的本地数据和模型。
+覆盖率验证：
 
-## 数据与结论边界
-
-### 模拟数据
-
-`scripts/generate_data.py` 生成帖子、评论、互动量、时间和平台字段，全部是合成记录，只适合开发与演示。
-
-### 公开情感语料派生数据
-
-`scripts/download_real_data.py` 可下载 ChnSentiCorp 和 waimai_10k。只有原始评论文本和情感标签来自公开语料；话题、账号、时间、互动量和派生评论仍是合成字段，因此它不是“真实社交媒体舆情数据”。脚本会在来源清单中记录这一限制，并保持 TLS 证书校验。
-
-### 模型解释
-
-- TextCNN 指标只描述固定随机种子下的本地留出集，不证明跨平台或真实舆情效果。
-- SIR 用讨论量曲线拟合有界参数，展示的是传播情景模拟；其中人群规模和 `R₀` 不能解释为真实平台用户规模或因果效应。
-- ARIMA 给出当前本地序列的统计外推和 95% 区间；过滤后少于 10 个点时明确拒绝预测。
-- 无数据、数据不足或来源未知时，API 会返回结构化错误，不会静默填入演示曲线。
-
-## 主要 API
-
-| 路径 | 作用 | 关键约束 |
-|---|---|---|
-| `/api/data_status` | 数据规模、日期范围、来源和评估状态 | 来源缺失时标记为 `inferred`/`unknown` |
-| `/api/overview` | 帖子、关联评论、情感和平台统计 | 日期与话题同时作用于帖子和关联评论 |
-| `/api/sentiment_trend` | 每日情感趋势 | 支持日期/话题筛选 |
-| `/api/word_freq` | 词云数据 | 支持日期/话题筛选 |
-| `/api/sir_prediction` | SIR 传播情景模拟 | `days` 为 1–90，至少 6 个观测点 |
-| `/api/arima_prediction` | ARIMA 时间序列预测 | `steps` 为 1–30，至少 10 个观测点 |
-| `/api/model_metrics` | 读取离线 TextCNN 评估报告 | 不在请求中训练；报告缺失返回 503 |
-| `/api/alerts` | 负面情感阈值预警 | 支持日期/话题筛选 |
-
-日期参数必须使用 `YYYY-MM-DD`，开始日期不能晚于结束日期。非法参数返回结构化 400；数据不足返回 422。
-
-## 可选 MongoDB 与安全默认值
-
-本地 JSON 是默认存储。只有显式设置 `MONGO_ENABLED=true` 时才尝试连接 MongoDB，避免未安装数据库时每个请求阻塞。
-
-常用环境变量：
-
-```text
-MONGO_ENABLED=false
-MONGO_HOST=localhost
-MONGO_PORT=27017
-MONGO_DB=sentiment_db
-WEB_PORT=5000
-WEB_DEBUG=false
-CORS_ORIGINS=
-RANDOM_SEED=42
+```powershell
+python -m pip install coverage
+python -m coverage run --source=crawler.adapters,services,storage.product_store,web.product_api -m unittest discover -s tests -v
+python -m coverage report -m
 ```
 
-Flask debug 默认关闭；同源大屏不默认开放跨域。需要独立前端时再用逗号分隔的 `CORS_ORIGINS` 显式授权。
+CI 只使用固定测试夹具和模拟采集适配路径，不连接真实社交平台。真实微博冒烟测试必须由用户扫码授权后手动执行。
 
-## 项目结构
+## 备份、恢复与故障排查
 
-```text
-├─ crawler/                 # 可选数据采集；fallback 明确标为 synthetic
-├─ data/                    # 本地数据与离线评估产物（Git 忽略）
-├─ docs/evidence/           # 基线、证据账本、排序、验收和复测结果
-├─ models/                  # TextCNN、LDA、SIR、ARIMA
-├─ processing/              # 清洗、分词、TF-IDF、词频
-├─ scripts/                 # 数据生成、公开语料派生、完整流水线
-├─ storage/                 # MongoDB / 本地 JSON 访问层
-├─ tests/                   # API 合约与数据泄漏回归测试
-├─ web/                     # Flask API 与 ECharts 大屏
-├─ config.py
-└─ requirements.txt
-```
+本地运行的数据默认位于 `runtime/`。停止 Web 和 Worker 后，备份整个目录即可。恢复时把备份复制回相同位置，再启动服务。
 
-## 尚未完成的验证
+- 登录页提示“尚未初始化管理员”：检查 `.env` 是否设置 `ADMIN_PASSWORD`，然后重启。
+- `ready` 返回 `503`：检查生产密钥、Redis 和 Worker；本地 `inline` 模式只需确认密钥配置。
+- 任务显示 `queue_unavailable`：Docker 中运行 `docker compose ps` 和 `docker compose logs worker`。
+- 采集任务显示 `license_confirmation_required`：先阅读许可证，不能通过修改代码绕过用途确认。
+- 采集任务显示 `login_or_challenge_required`：在浏览器中人工完成平台验证后重试。
+- LDA 或 ARIMA 显示不可用：按照提示增加有效文本、多样性或日观测点；系统不会自动填入模拟结果。
+- 报告生成失败：确认 `reportlab` 已安装且 `runtime/reports` 可写。
 
-- 没有代表性真实用户的任务成功率、完成时间或结构化访谈；
-- 没有真实社交媒体、跨时间和跨平台的独立测试集；
-- 没有官方比赛评分表，本轮优先级使用的是仓库内公开的临时权重；
-- 爬虫在实际使用前仍需确认平台条款、授权、隐私和采样偏差。
+## 安全与结论边界
 
-下一项最高价值实验是：在合规前提下取得带明确来源与许可的目标场景数据，冻结独立测试集，并与词典或传统机器学习基线做同条件比较。
+- `.env`、SQLite、采集会话、导入数据和报告均被 Git 忽略；
+- 管理员密码只保存 Werkzeug 哈希，不保存明文；
+- 页面不会回显密码、Cookie、密钥或异常堆栈；
+- 默认只允许同源请求，跨域需显式配置 `CORS_ORIGINS`；
+- 采集结果会受到登录权限、时间窗口、关键词与采样机制影响；
+- 透明词典基线适合筛查，不是人工标注精度声明；
+- 当前没有代表性真实用户测试，也没有跨平台独立测试集，不能宣称生产级舆情判断准确率。
+
+基线、候选方案、验收门槛、验证记录和答辩材料位于 [`docs/evidence/`](docs/evidence/)。
