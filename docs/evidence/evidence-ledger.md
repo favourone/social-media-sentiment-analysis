@@ -20,3 +20,7 @@
 | PDF 与 CSV 报告可生成和下载 | verified | `test_pdf_report_can_be_generated_and_downloaded`、CSV 对应用例 | 固定导入夹具；检查 PDF/CSV 文件签名 | 未做多页报告视觉人工复核 |
 | Docker Compose 可冷启动并持久化重启 | unknown | 当前主机没有 `docker` 命令 | 未执行 | 在装有 Docker 的机器运行构建、健康检查和卷重启验收 |
 | 外部 MediaCrawler 能在真实微博完成授权采集 | unknown | 仅完成固定版本适配器与伪进程测试 | 无真实账号和扫码执行 | 合规授权后做人工冒烟测试 |
+| V2 可完成监测、信号、事件、预警和简报闭环 | verified | `tests/test_v2_monitoring.py`、`product-v2-validation.md` | 6 条固定导入记录，inline 任务模式，全 API 流程复测 | 固定夹具不代表真实平台效果 |
+| V2 简报不会引用当前事件之外的信号 ID | verified | `test_llm_brief_accepts_only_current_integer_evidence_ids` | 模拟模型同时返回有效、无效、重复和非整数引用 | 未连接真实模型服务 |
+| RSS 与 Webhook 默认禁止访问内网目标 | verified | `test_invalid_feed_and_private_targets_fail_explicitly`、`network_safety.py` | 模拟 DNS 解析到 `127.0.0.1`，请求前拒绝 | 尚未完成 DNS 重绑定专项渗透测试 |
+| V2 新增核心模块覆盖率超过 80% 门槛 | verified | `tests/test_v2_monitoring.py`、`product-v2-validation.md` | Conda `cv`，886/1075 语句，82% | 覆盖率不等于业务准确性 |
