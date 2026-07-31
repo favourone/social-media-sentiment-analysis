@@ -64,6 +64,7 @@ REDIS_URL = os.environ.get(
 REDIS_CACHE_TTL = 3600  # 缓存过期时间（秒）
 TASK_QUEUE_MODE = os.environ.get('TASK_QUEUE_MODE', 'inline').strip().lower()
 RQ_QUEUE_NAME = os.environ.get('RQ_QUEUE_NAME', 'sentiment-jobs')
+MONITOR_SCHEDULER_SECONDS = int(os.environ.get('MONITOR_SCHEDULER_SECONDS', 30))
 
 # ==================== 爬虫配置 ====================
 CRAWLER_HEADERS = {
@@ -84,6 +85,17 @@ MEDIACRAWLER_TIMEOUT_SECONDS = int(os.environ.get(
     'MEDIACRAWLER_TIMEOUT_SECONDS', 1800
 ))
 COLLECTOR_LICENSE_ACCEPTED = env_bool('COLLECTOR_LICENSE_ACCEPTED', False)
+RSS_TIMEOUT_SECONDS = int(os.environ.get('RSS_TIMEOUT_SECONDS', 15))
+RSS_MAX_BYTES = int(os.environ.get('RSS_MAX_BYTES', 2 * 1024 * 1024))
+ALLOW_PRIVATE_NETWORK_URLS = env_bool('ALLOW_PRIVATE_NETWORK_URLS', False)
+WEBHOOK_TIMEOUT_SECONDS = int(os.environ.get('WEBHOOK_TIMEOUT_SECONDS', 10))
+
+# ==================== Optional evidence-grounded LLM ====================
+LLM_ENABLED = env_bool('LLM_ENABLED', False)
+LLM_BASE_URL = os.environ.get('LLM_BASE_URL', '').rstrip('/')
+LLM_API_KEY = os.environ.get('LLM_API_KEY', '')
+LLM_MODEL = os.environ.get('LLM_MODEL', '')
+LLM_TIMEOUT_SECONDS = int(os.environ.get('LLM_TIMEOUT_SECONDS', 60))
 
 # ==================== NLP 配置 ====================
 STOPWORDS_PATH = os.path.join(DATA_DIR, 'stopwords.txt')
