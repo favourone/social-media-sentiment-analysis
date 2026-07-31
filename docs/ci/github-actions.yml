@@ -5,7 +5,7 @@ name: CI
 
 on:
   push:
-    branches: [main, product/v1]
+    branches: [main, product/v1, product/v2]
   pull_request:
 
 jobs:
@@ -27,6 +27,7 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements.lock coverage
-      - run: python -m coverage run --source=crawler.adapters,services,storage.product_store,web.product_api -m unittest discover -s tests -v
+      - run: python -m unittest discover -s tests -v
+      - run: python -m coverage run --source=crawler.rss_adapter,services.intelligence,services.briefing,services.delivery,services.network_safety,storage.monitor_store,web.intelligence_api -m unittest tests.test_v2_monitoring
       - run: python -m coverage report --fail-under=80
       - run: python -m compileall -q .

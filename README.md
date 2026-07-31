@@ -1,18 +1,28 @@
-# 社交媒体舆情分析与热点事件预测平台 V1
+# 舆情雷达 V2：监测、事件发现与预警处置平台
 
-面向舆情分析人员的非商业教学与竞赛项目。系统把数据采集或导入、标准化去重、分析任务、风险预警、结果解释和 PDF/CSV 报告串成一条可追踪的工作流。
+面向舆情分析人员的非商业教学与竞赛项目。V2 不再以“运行几个模型”为产品主线，而是把日常工作整理成一条可追踪的闭环：
 
-> 重要边界：系统不会在采集失败时自动填入模拟结果。词典情感、LDA、SIR 和 ARIMA 都是辅助分析方法，必须结合原文、样本范围和数据来源人工复核。
+```text
+监测项目 → RSS / 微博 / 文件数据 → 规则筛选 → 事件聚合
+        → 可解释预警 → 人工处置 → 证据简报 / PDF / CSV
+```
 
-## 已完成的产品闭环
+> 重要边界：系统不会在采集失败时自动填入模拟结果。情感词典、相似度聚类、热度评分、可选 LLM、LDA、SIR 和 ARIMA 都是辅助筛查方法，必须回到引用原文、样本范围和数据来源人工复核。
+
+## V2 的实用功能
 
 - 单管理员登录、密码哈希、CSRF 防护、会话过期和登录限流；
 - SQLite 正式业务存储，WAL、事务和“平台 + 原始 ID”唯一约束；
-- `pending / running / paused / succeeded / failed / cancelled` 统一任务状态；
-- JSON、JSONL、CSV 安全导入和外部 MediaCrawler 微博适配器；
-- 摘要、词频、LDA、ARIMA、SIR 和已有大屏分析能力；
-- 带样本量、来源和解释边界的预警、PDF 报告与 CSV 明细；
-- Docker Compose 的 Web、RQ Worker、Redis 和持久卷；
+- 可复用监测项目：关注词、必须词、排除词、风险词、运行周期和阈值；
+- RSS/Atom、JSON/JSONL/CSV 和外部 MediaCrawler 微博适配器；
+- 信号流：显示匹配规则、风险词、来源、情感标签和原文链接；
+- 事件中心：使用字符 n-gram TF-IDF 聚合相似信号，展示热度、趋势、来源扩散、样本量与证据 ID；
+- 预警处置：风险词、负面比例、讨论量突增三类规则，支持确认、调查、解决、误报和重新打开，并记录审计轨迹；
+- 证据简报：默认使用完全本地的确定性摘要；可选接入 OpenAI 兼容接口，模型引用必须是数据库中真实存在的信号 ID；
+- Webhook 通知审计，数据库只保存目标站点，不保存包含令牌的完整路径；
+- 保留摘要、词频、LDA、ARIMA、SIR、旧分析大屏及 PDF/CSV 报告；
+- `pending / running / paused / succeeded / failed / cancelled` 统一任务状态，采集失败会明确暂停或失败；
+- Docker Compose 的 Web、RQ Worker、监测 Scheduler、Redis 和持久卷；
 - 健康检查、自动化测试、GitHub Actions CI 模板和证据文档。
 
 ## 使用 Conda `cv` 环境运行（推荐）
@@ -54,7 +64,7 @@ COLLECTOR_LICENSE_ACCEPTED=false
 python -m web
 ```
 
-然后访问 <http://127.0.0.1:5000>，使用 `.env` 中的 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 登录。工作台地址是 <http://127.0.0.1:5000/workspace>，原分析大屏是 <http://127.0.0.1:5000/dashboard>。
+然后访问 <http://127.0.0.1:5000>，使用 `.env` 中的 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 登录。V2 工作台地址是 <http://127.0.0.1:5000/workspace>，旧分析大屏是 <http://127.0.0.1:5000/dashboard>。
 
 如果不想激活环境，也可以直接运行：
 
@@ -62,13 +72,14 @@ python -m web
 & "D:\an\envs\cv\python.exe" -m web
 ```
 
-## 首次体验流程
+## 建议的首次体验流程
 
-1. 登录工作台，进入“数据采集”。
-2. 先上传 JSON、JSONL 或 CSV 文件验证完整闭环；单文件最大 10 MB。
-3. 进入“分析任务”，选择“完整分析”。
-4. 在“预警中心”查看达到阈值的话题，并回到原文人工复核。
-5. 在“报告中心”生成 PDF 报告或 CSV 明细。
+1. 登录工作台，进入“数据接入”，上传 JSON、JSONL 或 CSV；单文件最大 10 MB。
+2. 进入“监测项目”，配置关注词、排除词、风险词和阈值。
+3. 点击“立即运行”，系统会扫描已入库数据，并按需拉取公开 RSS 或调用已授权的微博采集器。
+4. 在“信号流”核对具体命中原因，在“事件中心”查看相似内容聚合。
+5. 在“预警处置”记录确认、调查、解决或误报；所有状态变化都有审计记录。
+6. 从事件详情生成带信号 ID 的证据简报，或在“报告”导出 PDF/CSV。
 
 导入记录至少需要正文，推荐字段如下：
 
@@ -88,6 +99,25 @@ python -m web
 ```
 
 `id` 也可写成 `post_id` 或 `source_id`；正文可写成 `text`、`content` 或 `desc`。缺少 ID 时系统使用正文与时间生成稳定哈希，缺少正文的记录会被拒绝并计入任务统计。
+
+## RSS、Webhook 与可选模型
+
+监测项目可以逐行填写公开 RSS/Atom 地址。服务端只接受 `http`/`https`，会在请求前和重定向后解析地址，默认拒绝回环、内网、链路本地和保留 IP，并限制响应大小和超时。Webhook 使用同一套出口校验。只有在受信任的隔离网络中确实需要内部地址时，才设置：
+
+```dotenv
+ALLOW_PRIVATE_NETWORK_URLS=true
+```
+
+核心流程完全不依赖大模型。默认事件简报由事件指标和证据信号确定性生成。若要使用本地 Ollama、LM Studio 或其他 OpenAI 兼容接口，可配置：
+
+```dotenv
+LLM_ENABLED=true
+LLM_BASE_URL=http://host.docker.internal:11434/v1
+LLM_MODEL=你的模型名称
+LLM_API_KEY=
+```
+
+模型返回内容会经过结构和引用校验；没有有效信号 ID 的结果会失败，不会冒充有证据的简报。请勿把密钥或未公开个人信息写入提示词。
 
 ## 微博采集器
 
@@ -125,13 +155,14 @@ MEDIACRAWLER_COMMAND_JSON=["uv","run","main.py","--platform","wb","--lt","qrcode
 Copy-Item .env.example .env
 docker compose up --build -d
 docker compose ps
-docker compose logs -f web worker
+docker compose logs -f web worker scheduler
 ```
 
 Compose 会把任务模式强制设为 `rq`，并启动：
 
 - `web`：Waitress 托管的 Flask 应用；
 - `worker`：单个 RQ Worker，串行执行耗时任务；
+- `scheduler`：扫描到期监测项目并送入队列，避免同一项目并发重复运行；
 - `redis`：队列服务和持久化队列元数据；
 - `app-runtime`：SQLite、导入文件和报告；
 - `redis-data`：Redis AOF 数据。
@@ -176,6 +207,27 @@ docker compose down
 | `/api/v1/health/live` | GET | 否 | 进程存活 |
 | `/api/v1/health/ready` | GET | 否 | 数据库、队列和生产配置就绪状态 |
 
+V2 工作台接口：
+
+| 接口 | 方法 | 用途 |
+|---|---|---|
+| `/api/v2/overview` | GET | 今日态势、重点事件和待处置预警 |
+| `/api/v2/monitors` | GET/POST | 监测项目列表与创建 |
+| `/api/v2/monitors/{id}` | GET/PATCH | 项目详情与规则修改 |
+| `/api/v2/monitors/{id}/status` | POST | 启用、暂停或归档 |
+| `/api/v2/monitors/{id}/run` | POST | 立即执行一次完整监测 |
+| `/api/v2/monitor-runs` | GET | 运行记录、进度、来源错误和统计 |
+| `/api/v2/signals` | GET | 按项目、关键词、平台和情感筛选信号 |
+| `/api/v2/events` | GET | 事件聚合列表 |
+| `/api/v2/events/{id}` | GET | 事件指标、证据信号和最新简报 |
+| `/api/v2/events/{id}/briefs` | POST | 生成证据约束的事件简报 |
+| `/api/v2/alerts` | GET | 预警队列 |
+| `/api/v2/alerts/{id}/transition` | POST | 处置状态流转并写入审计记录 |
+| `/api/v2/deliveries` | GET | Webhook 通知审计 |
+| `/api/v2/settings` | GET | Scheduler、网络和简报模式状态 |
+
+除登录和健康检查外，业务 API 都要求管理员登录；所有 V1/V2 写请求都要求当前会话的 CSRF token。
+
 ## 测试
 
 ```powershell
@@ -188,11 +240,11 @@ python -m compileall -q .
 
 ```powershell
 python -m pip install coverage
-python -m coverage run --source=crawler.adapters,services,storage.product_store,web.product_api -m unittest discover -s tests -v
+python -m coverage run --source=crawler,services,storage,web -m unittest discover -s tests -v
 python -m coverage report -m
 ```
 
-CI 模板位于 `docs/ci/github-actions.yml`，只使用固定测试夹具和模拟采集适配路径，不连接真实社交平台。当前模板不会被 GitHub 自动执行；为远程凭据增加 `workflow` 权限后，可将它复制到 `.github/workflows/ci.yml` 并单独提交。真实微博冒烟测试必须由用户扫码授权后手动执行。
+本机 Conda `cv` 环境的当前结果是 **39/39 通过**，包括原有 API 回归与 10 个 V2 核心场景；V2 核心模块语句覆盖率为 **82%（886/1075）**。CI 模板位于 `docs/ci/github-actions.yml`，只使用固定测试夹具和模拟采集适配路径，不连接真实社交平台。当前模板不会被 GitHub 自动执行；为远程凭据增加 `workflow` 权限后，可将它复制到 `.github/workflows/ci.yml` 并单独提交。真实微博冒烟测试必须由用户扫码授权后手动执行。
 
 ## 备份、恢复与故障排查
 
@@ -203,6 +255,8 @@ CI 模板位于 `docs/ci/github-actions.yml`，只使用固定测试夹具和模
 - 任务显示 `queue_unavailable`：Docker 中运行 `docker compose ps` 和 `docker compose logs worker`。
 - 采集任务显示 `license_confirmation_required`：先阅读许可证，不能通过修改代码绕过用途确认。
 - 采集任务显示 `login_or_challenge_required`：在浏览器中人工完成平台验证后重试。
+- RSS 任务显示 `unsafe_feed_url`：目标解析到了本机、内网或保留地址；不要为了绕过校验而关闭保护。
+- 监测运行显示 `sources_need_attention`：打开数据接入记录查看具体来源错误；系统不会把失败显示成空数据成功。
 - LDA 或 ARIMA 显示不可用：按照提示增加有效文本、多样性或日观测点；系统不会自动填入模拟结果。
 - 报告生成失败：确认 `reportlab` 已安装且 `runtime/reports` 可写。
 
