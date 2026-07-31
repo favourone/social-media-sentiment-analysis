@@ -176,11 +176,32 @@ function sourceLabels(monitor) {
     }).join('');
 }
 
+function runFailureHTML(run) {
+    if (!run || !['paused', 'failed'].includes(run.status)) return '';
+    const sourceError = run.stats?.source_errors?.[0];
+    const code = sourceError?.code || run.error_code || 'run_failed';
+    const message = sourceError?.message || run.error_message || '最近一次运行未成功完成';
+    return `<div class="notice error">
+        <strong>${escapeHTML(code)}</strong> · ${escapeHTML(message)}
+    </div>`;
+}
+
 async function loadMonitors() {
-    monitors = await api('/api/v2/monitors');
+    const [monitorData, runs] = await Promise.all([
+        api('/api/v2/monitors'),
+        api('/api/v2/monitor-runs?limit=200')
+    ]);
+    monitors = monitorData;
+    const latestRunByMonitor = new Map();
+    for (const run of runs) {
+        if (!latestRunByMonitor.has(run.monitor_id)) {
+            latestRunByMonitor.set(run.monitor_id, run);
+        }
+    }
     populateMonitorSelects();
     const host = document.getElementById('monitor-list');
     host.innerHTML = monitors.length ? monitors.map((monitor) => {
+        const latestRun = latestRunByMonitor.get(monitor.id);
         const terms = [
             ...(monitor.keywords || []).map((term) => `<span class="chip">${escapeHTML(term)}</span>`),
             ...(monitor.risk_terms || []).map((term) => `<span class="chip risk">${escapeHTML(term)}</span>`)
@@ -207,6 +228,7 @@ async function loadMonitors() {
                 <span>突增阈值 ${escapeHTML(monitor.spike_threshold)} 条</span>
                 <span>最近运行 ${fmtTime(monitor.last_run_at)}</span>
             </div>
+            ${runFailureHTML(latestRun)}
             <div class="card-actions">
                 ${monitor.status === 'active' ? `<button class="primary" data-action="run-monitor" data-id="${escapeHTML(monitor.id)}">立即运行</button>` : ''}
                 <button class="ghost" data-action="open-monitor-signals" data-id="${escapeHTML(monitor.id)}">查看信号</button>
@@ -246,6 +268,7 @@ function runCompact(run) {
         <strong>${escapeHTML(monitorName(run.monitor_id))}</strong>
         <small>${statusBadge(run.status)} · ${escapeHTML(run.progress)}%</small>
         <small>${fmtNumber(stats.matched_signals)} 信号 / ${fmtNumber(stats.events)} 事件</small>
+        ${run.error_message ? `<small title="${escapeHTML(run.error_message)}">${escapeHTML(run.error_code || run.error_message)}</small>` : ''}
     </div>`;
 }
 
@@ -282,7 +305,15 @@ async function loadSignals() {
         if (values.get(key) !== '') query.set(key, values.get(key));
     }
     const signals = await api(`/api/v2/signals?${query}`);
-    host.innerHTML = signals.length ? signals.map((signal) => {
+    if (!signals.length) {
+        const runs = await api(
+            `/api/v2/monitor-runs?monitor_id=${encodeURIComponent(monitorId)}&limit=1`
+        );
+        const failure = runFailureHTML(runs[0]);
+        host.innerHTML = failure || empty('当前筛选条件下没有匹配信号。');
+        return;
+    }
+    host.innerHTML = signals.map((signal) => {
         const url = safeHref(signal.source_url);
         const tags = [
             ...(signal.matched_terms || []).map((term) => `<span class="chip">${escapeHTML(term)}</span>`),
@@ -304,7 +335,7 @@ async function loadSignals() {
             </div>
             <div class="signal-score"><small>匹配度</small><br>${escapeHTML(signal.relevance_score)}<small>%</small></div>
         </article>`;
-    }).join('') : empty('当前筛选条件下没有匹配信号。');
+    }).join('');
 }
 
 function eventCard(event) {
