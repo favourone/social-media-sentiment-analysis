@@ -580,7 +580,8 @@ document.querySelectorAll('[data-refresh]').forEach((button) => {
 
 document.getElementById('monitor-form').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const payload = {
         name: form.get('name'),
         description: form.get('description'),
@@ -599,10 +600,10 @@ document.getElementById('monitor-form').addEventListener('submit', async (event)
     try {
         await api('/api/v2/monitors', {method: 'POST', body: JSON.stringify(payload)});
         notify('监测项目已创建');
-        event.currentTarget.reset();
-        event.currentTarget.elements.interval_minutes.value = '60';
-        event.currentTarget.elements.negative_threshold.value = '50';
-        event.currentTarget.elements.spike_threshold.value = '5';
+        formElement.reset();
+        formElement.elements.interval_minutes.value = '60';
+        formElement.elements.negative_threshold.value = '50';
+        formElement.elements.spike_threshold.value = '5';
         await loadMonitors();
         await loadOverview();
     } catch (error) {
@@ -677,7 +678,8 @@ document.getElementById('event-dialog').addEventListener('click', (event) => {
 
 document.getElementById('collection-form').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
         await api('/api/v1/collection-jobs', {
             method: 'POST',
@@ -687,8 +689,8 @@ document.getElementById('collection-form').addEventListener('submit', async (eve
             })
         });
         notify('微博采集任务已创建');
-        event.currentTarget.reset();
-        event.currentTarget.elements.max_pages.value = '3';
+        formElement.reset();
+        formElement.elements.max_pages.value = '3';
         await loadCollection();
     } catch (error) {
         notify(error.message, true);
@@ -697,13 +699,14 @@ document.getElementById('collection-form').addEventListener('submit', async (eve
 
 document.getElementById('import-form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const formElement = event.currentTarget;
     try {
         await api('/api/v1/imports', {
             method: 'POST',
-            body: new FormData(event.currentTarget)
+            body: new FormData(formElement)
         });
         notify('数据已提交导入');
-        event.currentTarget.reset();
+        formElement.reset();
         await loadCollection();
     } catch (error) {
         notify(error.message, true);
@@ -712,10 +715,11 @@ document.getElementById('import-form').addEventListener('submit', async (event) 
 
 document.getElementById('analysis-form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const formElement = event.currentTarget;
     try {
         await api('/api/v1/analysis-jobs', {
             method: 'POST',
-            body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget)))
+            body: JSON.stringify(Object.fromEntries(new FormData(formElement)))
         });
         notify('实验分析任务已创建');
         await loadAnalysis();
@@ -726,10 +730,11 @@ document.getElementById('analysis-form').addEventListener('submit', async (event
 
 document.getElementById('report-form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const formElement = event.currentTarget;
     try {
         await api('/api/v1/reports', {
             method: 'POST',
-            body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget)))
+            body: JSON.stringify(Object.fromEntries(new FormData(formElement)))
         });
         notify('报告生成任务已创建');
         await loadReports();
@@ -740,10 +745,11 @@ document.getElementById('report-form').addEventListener('submit', async (event) 
 
 document.getElementById('password-form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const formElement = event.currentTarget;
     try {
         await api('/api/v1/auth/password', {
             method: 'POST',
-            body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget)))
+            body: JSON.stringify(Object.fromEntries(new FormData(formElement)))
         });
         window.location.href = '/login';
     } catch (error) {
