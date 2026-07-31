@@ -36,6 +36,8 @@ if config.CORS_ORIGINS:
 
 from web.product_api import register_product_routes
 register_product_routes(app)
+from web.intelligence_api import register_intelligence_routes
+register_intelligence_routes(app)
 
 
 @app.after_request

@@ -48,6 +48,24 @@ services:
       redis:
         condition: service_healthy
 
+  scheduler:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "services.scheduler"]
+    env_file: ${ENV_FILE:-.env}
+    environment:
+      TASK_QUEUE_MODE: rq
+      REDIS_URL: redis://redis:6379/0
+      RUNTIME_DIR: /app/runtime
+      PRODUCT_DB_PATH: /app/runtime/sentiment.db
+      REPORT_DIR: /app/runtime/reports
+      IMPORT_DIR: /app/runtime/imports
+    volumes:
+      - app-runtime:/app/runtime
+    depends_on:
+      redis:
+        condition: service_healthy
+
 volumes:
   app-runtime:
   redis-data:

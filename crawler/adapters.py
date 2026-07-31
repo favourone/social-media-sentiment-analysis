@@ -371,9 +371,12 @@ class MediaCrawlerWeiboAdapter(CollectorAdapter):
 
 
 def get_collector(name):
+    from crawler.rss_adapter import RSSFeedAdapter
+
     adapters = {
         'file': FileImportAdapter,
         'mediacrawler': MediaCrawlerWeiboAdapter,
+        'rss': RSSFeedAdapter,
     }
     adapter = adapters.get(name)
     if adapter is None:
