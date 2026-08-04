@@ -288,6 +288,7 @@ async function loadOverview() {
     document.getElementById('overview-runs').innerHTML = data.recent_runs.length
         ? data.recent_runs.map(runCompact).join('')
         : empty('还没有监测运行记录。');
+    await loadCompetitionStory();
 }
 
 async function loadSignals() {
@@ -401,6 +402,9 @@ function briefHTML(brief) {
 async function openEvent(eventId) {
     const event = await api(`/api/v2/events/${encodeURIComponent(eventId)}`);
     const metrics = event.metrics || {};
+    const visualizationDetail = typeof competitionEventDetailHTML === 'function'
+        ? competitionEventDetailHTML(eventId)
+        : '';
     const signals = (event.signals || []).map((signal) => {
         const url = safeHref(signal.source_url);
         return `<article class="evidence-item">
@@ -413,11 +417,12 @@ async function openEvent(eventId) {
         <p class="eyebrow">EVIDENCE BUNDLE</p>
         <h2>${escapeHTML(event.title)}</h2>
         <p class="muted">${escapeHTML(event.summary)}</p>
-        <div class="event-metrics">
+        ${visualizationDetail ? '' : `<div class="event-metrics">
             <span><strong>${fmtNumber(metrics.sample_count)}</strong>信号</span>
             <span><strong>${escapeHTML(metrics.negative_ratio || 0)}%</strong>负面筛查</span>
             <span><strong>${escapeHTML(metrics.heat_score || 0)}</strong>热度</span>
-        </div>
+        </div>`}
+        ${visualizationDetail}
         ${briefHTML(event.latest_brief)}
         <div class="card-actions"><button class="secondary" data-action="create-brief" data-id="${escapeHTML(event.id)}">重新生成简报</button></div>
         <h3>原始证据</h3>

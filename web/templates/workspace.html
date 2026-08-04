@@ -3,8 +3,9 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>舆情雷达 V2 · 研判工作台</title>
+    <title>舆情雷达 · 公共事件态势可视化</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='product.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='visualization.css') }}">
 </head>
 <body>
     <header class="topbar">
@@ -26,27 +27,75 @@
         <div id="global-message" class="notice hidden" role="status"></div>
 
         <section class="page active" id="section-overview">
-            <div class="hero-heading">
-                <div>
-                    <p class="eyebrow">SITUATION ROOM</p>
-                    <h1>从噪声中找到<br><span>真正需要处理的事件。</span></h1>
-                    <p>系统只汇总当前采集范围内的证据。预警和简报是分析线索，不替代原文核实。</p>
+            <div class="competition-hero">
+                <div class="hero-copy">
+                    <p class="eyebrow">PUBLIC EVENT INTELLIGENCE</p>
+                    <span class="hero-edition">全国大学生数字媒体科技作品及创意竞赛 · 数据可视化</span>
+                    <h1>让公共事件的<br><span>演化脉络被看见。</span></h1>
+                    <p>从多源信号中发现异常、归并事件、核验证据并记录处置。所有图表均可追溯到当前样本，不把筛查指标包装成事实概率。</p>
+                    <div class="hero-actions">
+                        <button class="primary" data-action="seed-demo">载入离线演示案例</button>
+                        <button class="secondary" data-goto="monitors">连接真实数据</button>
+                    </div>
                 </div>
-                <div class="hero-actions">
-                    <button class="primary" data-goto="monitors">新建监测项目</button>
-                    <button class="secondary" data-refresh="overview">刷新态势</button>
-                </div>
+                <ol class="story-spine" aria-label="舆情研判流程">
+                    <li><span>01</span><strong>发现</strong><small>捕捉异常信号</small></li>
+                    <li><span>02</span><strong>聚合</strong><small>形成事件脉络</small></li>
+                    <li><span>03</span><strong>核验</strong><small>回到原始证据</small></li>
+                    <li><span>04</span><strong>处置</strong><small>记录响应闭环</small></li>
+                </ol>
             </div>
+            <div class="story-toolbar panel">
+                <label>当前观察对象<select id="story-monitor" class="monitor-select" aria-label="选择态势可视化监测项目"></select></label>
+                <div id="story-data-badge" class="data-mode-badge">等待数据</div>
+                <button class="ghost" data-refresh="overview">刷新全部图表</button>
+                <p id="story-window" class="story-window">尚未选择监测项目</p>
+            </div>
+            <div id="story-provenance" class="provenance-strip" role="note"></div>
             <div class="metric-grid">
-                <article class="metric"><span>启用监测</span><strong id="metric-monitors">—</strong><small>持续运行的项目</small></article>
-                <article class="metric"><span>匹配信号</span><strong id="metric-signals">—</strong><small>去重后的有效信息</small></article>
+                <article class="metric"><span>观察样本</span><strong id="metric-signals">—</strong><small id="metric-sample-note">当前筛选范围</small></article>
                 <article class="metric"><span>聚合事件</span><strong id="metric-events">—</strong><small>按内容相似度归并</small></article>
+                <article class="metric"><span>风险词信号</span><strong id="metric-risk-signals">—</strong><small id="metric-risk-ratio">—</small></article>
                 <article class="metric alert-metric"><span>待处置预警</span><strong id="metric-alerts">—</strong><small id="metric-high-alerts">— 条高风险</small></article>
+                <span id="metric-monitors" class="hidden">—</span>
             </div>
-            <div class="dashboard-grid">
+            <div id="story-empty" class="story-empty hidden"></div>
+            <div id="story-dashboard" class="visual-story-grid">
+                <article class="panel chart-panel timeline-panel span-8">
+                    <div class="panel-title">
+                        <div><p class="kicker">01 · EVOLUTION</p><h2>声量与风险演化</h2><p>上下对齐的两个坐标面板，避免双轴制造虚假相关。</p></div>
+                    </div>
+                    <div id="timeline-chart" class="chart-host"></div>
+                </article>
+                <article class="panel chart-panel source-panel span-4">
+                    <div class="panel-title"><div><p class="kicker">SOURCE MIX</p><h2>来源构成</h2><p>长度从零基线编码样本数。</p></div></div>
+                    <div id="source-chart" class="chart-host"></div>
+                </article>
+                <article class="panel chart-panel span-7">
+                    <div class="panel-title"><div><p class="kicker">02 · PRIORITY</p><h2>事件风险矩阵</h2><p>横轴为负面筛查占比，纵轴为描述性热度评分。</p></div></div>
+                    <div id="risk-map" class="chart-host"></div>
+                </article>
+                <article class="panel insight-panel span-5">
+                    <div class="panel-title"><div><p class="kicker">READOUT</p><h2>态势读数</h2><p>由当前图表数值确定性生成。</p></div></div>
+                    <ol id="story-insights" class="insight-list"></ol>
+                    <div id="story-definitions" class="definition-box"></div>
+                </article>
+                <article class="panel chart-panel span-12">
+                    <div class="panel-title"><div><p class="kicker">03 · EVENT LANES</p><h2>事件演化时间带</h2><p>同一时间刻度比较各事件出现、增长与回落过程。</p></div></div>
+                    <div id="event-lanes" class="chart-host"></div>
+                </article>
+                <article class="panel chart-panel evidence-network-panel span-12">
+                    <div class="panel-title">
+                        <div><p class="kicker">04 · EVIDENCE GRAPH</p><h2>来源—事件证据关系网</h2><p id="network-meaning">连线表示证据归属，不代表转发或因果传播路径。</p></div>
+                        <button class="text-button" data-goto="signals">查看全部原始证据 →</button>
+                    </div>
+                    <div id="evidence-network" class="chart-host"></div>
+                </article>
+            </div>
+            <div class="dashboard-grid operation-grid">
                 <article class="panel span-7">
                     <div class="panel-title">
-                        <div><p class="kicker">TOP EVENTS</p><h2>当前重点事件</h2></div>
+                        <div><p class="kicker">VERIFY</p><h2>重点事件证据入口</h2></div>
                         <button class="text-button" data-goto="events">查看全部 →</button>
                     </div>
                     <div id="overview-events" class="rank-list"></div>
@@ -58,12 +107,10 @@
                     </div>
                     <div id="overview-alerts" class="compact-list"></div>
                 </article>
-                <article class="panel span-12">
-                    <div class="panel-title">
-                        <div><p class="kicker">RUN HISTORY</p><h2>最近监测运行</h2></div>
-                    </div>
+                <details class="panel span-12 run-details">
+                    <summary><span><small>RUN HISTORY</small><strong>最近监测运行与数据源状态</strong></span><span>展开查看</span></summary>
                     <div id="overview-runs" class="run-strip"></div>
-                </article>
+                </details>
             </div>
         </section>
 
@@ -223,6 +270,7 @@
         <div id="event-detail"></div>
     </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="{{ url_for('static', filename='visualization.js') }}"></script>
     <script src="{{ url_for('static', filename='product.js') }}"></script>
 </body>
 </html>
