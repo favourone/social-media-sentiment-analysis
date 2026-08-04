@@ -24,3 +24,6 @@
 | V2 简报不会引用当前事件之外的信号 ID | verified | `test_llm_brief_accepts_only_current_integer_evidence_ids` | 模拟模型同时返回有效、无效、重复和非整数引用 | 未连接真实模型服务 |
 | RSS 与 Webhook 默认禁止访问内网目标 | verified | `test_invalid_feed_and_private_targets_fail_explicitly`、`network_safety.py` | 模拟 DNS 解析到 `127.0.0.1`，请求前拒绝 | 尚未完成 DNS 重绑定专项渗透测试 |
 | V2 新增核心模块覆盖率超过 80% 门槛 | verified | `tests/test_v2_monitoring.py`、`product-v2-validation.md` | Conda `cv`，886/1075 语句，82% | 覆盖率不等于业务准确性 |
+| 国赛离线案例可重复并且不产生重复记录 | verified | `test_demo_is_idempotent_and_visual_story_is_complete`、`competition-data-visualization.md` | 第一次新增 54；第二次新增 0、重复 54；稳定聚合为 3 事件 | 数据是明确标记的合成案例，不代表真实校园 |
+| 竞赛态势视图在桌面和移动视口可读 | verified | `competition-data-visualization.md`、真实浏览器验收 | 1440×900 和 390×844；手机端页面无横向溢出，SVG 卡片内滚动 | 未完成 Firefox/Safari 真机和目标评委理解度测试 |
+| 新增竞赛后端模块达到覆盖率门槛 | verified | `tests/test_competition_visualization.py`、`competition-data-visualization.md` | Conda `cv`，183/196 语句，93% | 前端 SVG 主要使用真实浏览器验收，尚无专用 JS 单元测试 |
