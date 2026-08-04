@@ -176,11 +176,32 @@ function sourceLabels(monitor) {
     }).join('');
 }
 
+function runFailureHTML(run) {
+    if (!run || !['paused', 'failed'].includes(run.status)) return '';
+    const sourceError = run.stats?.source_errors?.[0];
+    const code = sourceError?.code || run.error_code || 'run_failed';
+    const message = sourceError?.message || run.error_message || '最近一次运行未成功完成';
+    return `<div class="notice error">
+        <strong>${escapeHTML(code)}</strong> · ${escapeHTML(message)}
+    </div>`;
+}
+
 async function loadMonitors() {
-    monitors = await api('/api/v2/monitors');
+    const [monitorData, runs] = await Promise.all([
+        api('/api/v2/monitors'),
+        api('/api/v2/monitor-runs?limit=200')
+    ]);
+    monitors = monitorData;
+    const latestRunByMonitor = new Map();
+    for (const run of runs) {
+        if (!latestRunByMonitor.has(run.monitor_id)) {
+            latestRunByMonitor.set(run.monitor_id, run);
+        }
+    }
     populateMonitorSelects();
     const host = document.getElementById('monitor-list');
     host.innerHTML = monitors.length ? monitors.map((monitor) => {
+        const latestRun = latestRunByMonitor.get(monitor.id);
         const terms = [
             ...(monitor.keywords || []).map((term) => `<span class="chip">${escapeHTML(term)}</span>`),
             ...(monitor.risk_terms || []).map((term) => `<span class="chip risk">${escapeHTML(term)}</span>`)
@@ -207,6 +228,7 @@ async function loadMonitors() {
                 <span>突增阈值 ${escapeHTML(monitor.spike_threshold)} 条</span>
                 <span>最近运行 ${fmtTime(monitor.last_run_at)}</span>
             </div>
+            ${runFailureHTML(latestRun)}
             <div class="card-actions">
                 ${monitor.status === 'active' ? `<button class="primary" data-action="run-monitor" data-id="${escapeHTML(monitor.id)}">立即运行</button>` : ''}
                 <button class="ghost" data-action="open-monitor-signals" data-id="${escapeHTML(monitor.id)}">查看信号</button>
@@ -246,6 +268,7 @@ function runCompact(run) {
         <strong>${escapeHTML(monitorName(run.monitor_id))}</strong>
         <small>${statusBadge(run.status)} · ${escapeHTML(run.progress)}%</small>
         <small>${fmtNumber(stats.matched_signals)} 信号 / ${fmtNumber(stats.events)} 事件</small>
+        ${run.error_message ? `<small title="${escapeHTML(run.error_message)}">${escapeHTML(run.error_code || run.error_message)}</small>` : ''}
     </div>`;
 }
 
@@ -265,6 +288,7 @@ async function loadOverview() {
     document.getElementById('overview-runs').innerHTML = data.recent_runs.length
         ? data.recent_runs.map(runCompact).join('')
         : empty('还没有监测运行记录。');
+    await loadCompetitionStory();
 }
 
 async function loadSignals() {
@@ -282,7 +306,15 @@ async function loadSignals() {
         if (values.get(key) !== '') query.set(key, values.get(key));
     }
     const signals = await api(`/api/v2/signals?${query}`);
-    host.innerHTML = signals.length ? signals.map((signal) => {
+    if (!signals.length) {
+        const runs = await api(
+            `/api/v2/monitor-runs?monitor_id=${encodeURIComponent(monitorId)}&limit=1`
+        );
+        const failure = runFailureHTML(runs[0]);
+        host.innerHTML = failure || empty('当前筛选条件下没有匹配信号。');
+        return;
+    }
+    host.innerHTML = signals.map((signal) => {
         const url = safeHref(signal.source_url);
         const tags = [
             ...(signal.matched_terms || []).map((term) => `<span class="chip">${escapeHTML(term)}</span>`),
@@ -304,7 +336,7 @@ async function loadSignals() {
             </div>
             <div class="signal-score"><small>匹配度</small><br>${escapeHTML(signal.relevance_score)}<small>%</small></div>
         </article>`;
-    }).join('') : empty('当前筛选条件下没有匹配信号。');
+    }).join('');
 }
 
 function eventCard(event) {
@@ -370,6 +402,9 @@ function briefHTML(brief) {
 async function openEvent(eventId) {
     const event = await api(`/api/v2/events/${encodeURIComponent(eventId)}`);
     const metrics = event.metrics || {};
+    const visualizationDetail = typeof competitionEventDetailHTML === 'function'
+        ? competitionEventDetailHTML(eventId)
+        : '';
     const signals = (event.signals || []).map((signal) => {
         const url = safeHref(signal.source_url);
         return `<article class="evidence-item">
@@ -382,11 +417,12 @@ async function openEvent(eventId) {
         <p class="eyebrow">EVIDENCE BUNDLE</p>
         <h2>${escapeHTML(event.title)}</h2>
         <p class="muted">${escapeHTML(event.summary)}</p>
-        <div class="event-metrics">
+        ${visualizationDetail ? '' : `<div class="event-metrics">
             <span><strong>${fmtNumber(metrics.sample_count)}</strong>信号</span>
             <span><strong>${escapeHTML(metrics.negative_ratio || 0)}%</strong>负面筛查</span>
             <span><strong>${escapeHTML(metrics.heat_score || 0)}</strong>热度</span>
-        </div>
+        </div>`}
+        ${visualizationDetail}
         ${briefHTML(event.latest_brief)}
         <div class="card-actions"><button class="secondary" data-action="create-brief" data-id="${escapeHTML(event.id)}">重新生成简报</button></div>
         <h3>原始证据</h3>
@@ -580,7 +616,8 @@ document.querySelectorAll('[data-refresh]').forEach((button) => {
 
 document.getElementById('monitor-form').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const payload = {
         name: form.get('name'),
         description: form.get('description'),
@@ -599,10 +636,10 @@ document.getElementById('monitor-form').addEventListener('submit', async (event)
     try {
         await api('/api/v2/monitors', {method: 'POST', body: JSON.stringify(payload)});
         notify('监测项目已创建');
-        event.currentTarget.reset();
-        event.currentTarget.elements.interval_minutes.value = '60';
-        event.currentTarget.elements.negative_threshold.value = '50';
-        event.currentTarget.elements.spike_threshold.value = '5';
+        formElement.reset();
+        formElement.elements.interval_minutes.value = '60';
+        formElement.elements.negative_threshold.value = '50';
+        formElement.elements.spike_threshold.value = '5';
         await loadMonitors();
         await loadOverview();
     } catch (error) {
@@ -677,7 +714,8 @@ document.getElementById('event-dialog').addEventListener('click', (event) => {
 
 document.getElementById('collection-form').addEventListener('submit', async (event) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
         await api('/api/v1/collection-jobs', {
             method: 'POST',
@@ -687,8 +725,8 @@ document.getElementById('collection-form').addEventListener('submit', async (eve
             })
         });
         notify('微博采集任务已创建');
-        event.currentTarget.reset();
-        event.currentTarget.elements.max_pages.value = '3';
+        formElement.reset();
+        formElement.elements.max_pages.value = '3';
         await loadCollection();
     } catch (error) {
         notify(error.message, true);
@@ -697,13 +735,14 @@ document.getElementById('collection-form').addEventListener('submit', async (eve
 
 document.getElementById('import-form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const formElement = event.currentTarget;
     try {
         await api('/api/v1/imports', {
             method: 'POST',
-            body: new FormData(event.currentTarget)
+            body: new FormData(formElement)
         });
         notify('数据已提交导入');
-        event.currentTarget.reset();
+        formElement.reset();
         await loadCollection();
     } catch (error) {
         notify(error.message, true);
@@ -712,10 +751,11 @@ document.getElementById('import-form').addEventListener('submit', async (event) 
 
 document.getElementById('analysis-form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const formElement = event.currentTarget;
     try {
         await api('/api/v1/analysis-jobs', {
             method: 'POST',
-            body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget)))
+            body: JSON.stringify(Object.fromEntries(new FormData(formElement)))
         });
         notify('实验分析任务已创建');
         await loadAnalysis();
@@ -726,10 +766,11 @@ document.getElementById('analysis-form').addEventListener('submit', async (event
 
 document.getElementById('report-form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const formElement = event.currentTarget;
     try {
         await api('/api/v1/reports', {
             method: 'POST',
-            body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget)))
+            body: JSON.stringify(Object.fromEntries(new FormData(formElement)))
         });
         notify('报告生成任务已创建');
         await loadReports();
@@ -740,10 +781,11 @@ document.getElementById('report-form').addEventListener('submit', async (event) 
 
 document.getElementById('password-form').addEventListener('submit', async (event) => {
     event.preventDefault();
+    const formElement = event.currentTarget;
     try {
         await api('/api/v1/auth/password', {
             method: 'POST',
-            body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget)))
+            body: JSON.stringify(Object.fromEntries(new FormData(formElement)))
         });
         window.location.href = '/login';
     } catch (error) {

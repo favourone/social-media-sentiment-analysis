@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 import config
 from flask import Blueprint, request, session
 
+from services.competition_demo import seed_competition_demo
+from services.visualization import build_visual_story
 from storage.monitor_store import ALERT_STATUSES, MONITOR_STATUSES, get_monitor_store
 from storage.product_store import utc_now
 from web.product_api import (
@@ -164,6 +166,44 @@ def overview():
             reverse=True,
         )[:5],
     })
+
+
+@intelligence.get('/api/v2/visual-story')
+@login_required_api
+def visual_story():
+    """Return traceable aggregates for the competition visualization view."""
+    monitor_id = str(request.args.get('monitor_id', '')).strip()
+    store = get_monitor_store()
+    monitor = store.get_monitor(monitor_id) if monitor_id else None
+    if not monitor:
+        return error('invalid_monitor', '请选择有效的监测项目', 400)
+    summary = store.signal_summary(monitor_id)
+    cap = 3000
+    signals = []
+    while len(signals) < min(summary['total'], cap):
+        page = store.list_signals(
+            monitor_id,
+            limit=min(500, cap - len(signals)),
+            offset=len(signals),
+        )
+        if not page:
+            break
+        signals.extend(page)
+    return success(build_visual_story(
+        monitor,
+        signals,
+        store.list_events(monitor_id, limit=500),
+        store.list_alerts(monitor_id=monitor_id, limit=500),
+        total_available=summary['total'],
+    ))
+
+
+@intelligence.post('/api/v2/demo/seed')
+@login_required_api
+@csrf_required
+def competition_demo_seed():
+    """Load an explicit synthetic case for deterministic offline judging."""
+    return success(seed_competition_demo(), 201)
 
 
 @intelligence.get('/api/v2/settings')

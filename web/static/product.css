@@ -249,6 +249,7 @@ input:focus, select:focus, textarea:focus {
 .monitor-card h3, .signal-card h3, .event-card h3, .incident-card h3 { margin: 0; font-size: 17px; }
 .monitor-card p, .signal-card p, .event-card p, .incident-card p { color: var(--muted); line-height: 1.65; }
 .monitor-meta, .signal-meta, .incident-meta, .event-meta { display: flex; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+.monitor-card .notice { margin: 14px 0 0; font-size: 12px; }
 .card-actions, .signal-actions, .incident-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 15px; }
 .card-actions button, .incident-actions button, .signal-actions .button { padding: 7px 11px; font-size: 12px; }
 .chip, .source-tag { display: inline-flex; padding: 4px 8px; border-radius: 99px; color: #35616a; background: #e7f6f4; font-size: 11px; font-weight: 700; }
