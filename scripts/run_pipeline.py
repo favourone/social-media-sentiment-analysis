@@ -326,7 +326,7 @@ def step5_import_to_mongo():
 def main():
     """主流程"""
     print("\n" + "🌟" * 30)
-    print("  社交媒体舆情分析与热点事件预测系统")
+    print("  校园公共安全与民生服务舆情实验分析流水线")
     print("  完整数据处理流水线")
     print("🌟" * 30)
 

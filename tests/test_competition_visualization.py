@@ -132,6 +132,10 @@ class CompetitionDemoApiTest(unittest.TestCase):
         self.assertEqual(first_data['records'], 54)
         self.assertEqual(first_data['inserted'], 54)
         self.assertEqual(first_data['run']['status'], 'succeeded')
+        self.assertEqual(
+            first_data['monitor']['name'],
+            '高校校园安全与民生服务｜国赛演示',
+        )
         monitor_id = first_data['monitor']['id']
 
         story_response = self.client.get(
@@ -151,6 +155,35 @@ class CompetitionDemoApiTest(unittest.TestCase):
         self.assertTrue(story['graph']['nodes'])
         self.assertTrue(story['graph']['edges'])
 
+        analytics_response = self.client.get(
+            '/api/v2/analytics', query_string={'monitor_id': monitor_id}
+        )
+        self.assertEqual(analytics_response.status_code, 200)
+        analytics = analytics_response.get_json()['data']
+        self.assertEqual(analytics['summary']['signals'], 54)
+        self.assertEqual(analytics['readiness']['documents'], 54)
+        self.assertTrue(analytics['readiness']['lda']['available'])
+        self.assertTrue(analytics['top_words'])
+        self.assertEqual(
+            sorted(item['sample_count'] for item in analytics['events']),
+            [12, 14, 28],
+        )
+
+        analysis_response = self.client.post(
+            '/api/v1/analysis-jobs',
+            json={'type': 'summary', 'monitor_id': monitor_id},
+            headers=headers,
+        )
+        self.assertEqual(
+            analysis_response.status_code,
+            202,
+            analysis_response.get_data(as_text=True),
+        )
+        analysis = analysis_response.get_json()['data']
+        self.assertEqual(analysis['params']['monitor_id'], monitor_id)
+        self.assertEqual(analysis['status'], 'succeeded')
+        self.assertEqual(analysis['result']['summary']['sample_count'], 54)
+
         second = self.client.post('/api/v2/demo/seed', headers=headers)
         self.assertEqual(second.status_code, 201)
         second_data = second.get_json()['data']
@@ -162,11 +195,25 @@ class CompetitionDemoApiTest(unittest.TestCase):
         self.assertEqual(
             self.client.get('/api/v2/visual-story').status_code, 401
         )
+        self.assertEqual(
+            self.client.get('/api/v2/analytics').status_code, 401
+        )
         self.login()
+        workspace = self.client.get('/workspace')
+        self.assertEqual(workspace.status_code, 200)
+        workspace_html = workspace.get_data(as_text=True)
+        self.assertIn('校园舆情雷达', workspace_html)
+        self.assertIn('校园安全与民生服务', workspace_html)
+        self.assertIn('分析实验室', workspace_html)
+        self.assertNotIn('让公共事件的', workspace_html)
         invalid = self.client.get(
             '/api/v2/visual-story', query_string={'monitor_id': 'missing'}
         )
         self.assertEqual(invalid.status_code, 400)
+        invalid_analytics = self.client.get(
+            '/api/v2/analytics', query_string={'monitor_id': 'missing'}
+        )
+        self.assertEqual(invalid_analytics.status_code, 400)
 
 
 if __name__ == '__main__':

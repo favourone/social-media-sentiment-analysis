@@ -299,7 +299,12 @@ class ProductApiTest(unittest.TestCase):
         return response.get_json()['data']
 
     def test_protected_endpoints_require_login_and_csrf(self):
-        self.assertEqual(self.client.get('/').status_code, 302)
+        root = self.client.get('/')
+        self.assertEqual(root.status_code, 302)
+        self.assertTrue(root.headers['Location'].endswith('/workspace'))
+        legacy = self.client.get('/dashboard')
+        self.assertEqual(legacy.status_code, 302)
+        self.assertTrue(legacy.headers['Location'].endswith('/workspace#analytics'))
         self.assertEqual(self.client.get('/workspace').status_code, 302)
         self.assertEqual(self.client.get('/api/v1/collection-jobs').status_code, 401)
         csrf = self.login()

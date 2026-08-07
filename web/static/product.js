@@ -135,6 +135,7 @@ function activateSection(name) {
         signals: loadSignals,
         events: loadEvents,
         alerts: loadAlerts,
+        analytics: loadAnalytics,
         data: loadCollection,
         reports: loadReports,
         settings: loadSettings
@@ -231,6 +232,7 @@ async function loadMonitors() {
             ${runFailureHTML(latestRun)}
             <div class="card-actions">
                 ${monitor.status === 'active' ? `<button class="primary" data-action="run-monitor" data-id="${escapeHTML(monitor.id)}">立即运行</button>` : ''}
+                <button class="secondary" data-action="open-monitor-analytics" data-id="${escapeHTML(monitor.id)}">分析实验室</button>
                 <button class="ghost" data-action="open-monitor-signals" data-id="${escapeHTML(monitor.id)}">查看信号</button>
                 <button class="ghost" data-action="open-monitor-events" data-id="${escapeHTML(monitor.id)}">查看事件</button>
                 ${action}
@@ -505,21 +507,246 @@ async function loadCollection() {
         </tr>`).join('') : '<tr><td colspan="6" class="empty-cell">还没有数据接入记录</td></tr>';
 }
 
+function analyticsMonitorId() {
+    return document.getElementById('analytics-monitor')?.value || '';
+}
+
+function renderAnalyticsProvenance(data) {
+    const host = document.getElementById('analytics-provenance');
+    const provenance = data.provenance || {};
+    const range = provenance.observed_from && provenance.observed_to
+        ? `${fmtTime(provenance.observed_from)} — ${fmtTime(provenance.observed_to)}`
+        : '暂无有效时间范围';
+    const methods = (provenance.sentiment_methods || [])
+        .map((item) => `${item.method} ${fmtNumber(item.count)} 条`)
+        .join('、') || '未记录';
+    host.className = `provenance-strip analytics-provenance ${provenance.data_mode === 'demo' ? 'demo' : ''}`;
+    host.innerHTML = `
+        <span><strong>数据性质：</strong>${escapeHTML(provenance.data_mode_label || '未标记')}</span>
+        <span><strong>样本：</strong>${fmtNumber(provenance.sample_count)} / ${fmtNumber(provenance.total_available)} 条</span>
+        <span><strong>观察窗口：</strong>${escapeHTML(range)}</span>
+        <span><strong>情感方法：</strong>${escapeHTML(methods)}</span>
+        <span><strong>边界：</strong>${escapeHTML(provenance.note || '')}</span>`;
+}
+
+function renderAnalyticsWordCloud(words) {
+    const host = document.getElementById('analytics-word-cloud');
+    if (!words.length) {
+        host.innerHTML = empty('当前项目没有可统计的文本词频。');
+        return;
+    }
+    const visible = words.slice(0, 10);
+    const maximum = Math.max(...visible.map((item) => Number(item.count || 0)), 1);
+    host.innerHTML = `<div class="term-rank-list">${visible.map((item, index) => {
+        const width = Number(item.count || 0) / maximum * 100;
+        return `<article class="term-rank-row${index === 0 ? ' leader' : ''}">
+            <span class="term-rank-number">${String(index + 1).padStart(2, '0')}</span>
+            <div class="term-rank-main">
+                <div><strong>${escapeHTML(item.word)}</strong><span>${fmtNumber(item.count)} 次</span></div>
+                <div class="term-track" role="img" aria-label="${escapeHTML(item.word)}出现 ${fmtNumber(item.count)} 次"><span style="width:${width.toFixed(1)}%"></span></div>
+            </div>
+        </article>`;
+    }).join('')}</div>` + chartTable(
+        ['排名', '词语', '出现次数'],
+        words.map((item, index) => [index + 1, item.word, item.count]),
+        '当前监测项目高频词完整数据',
+    );
+}
+
+function renderAnalyticsTrend(data) {
+    const host = document.getElementById('analytics-trend');
+    if (!data.length) {
+        host.innerHTML = empty('没有带有效时间的信号，无法绘制趋势。');
+        return;
+    }
+    const width = 780;
+    const height = 318;
+    const left = 50;
+    const right = 18;
+    const top = 34;
+    const bottom = 68;
+    const plotWidth = width - left - right;
+    const plotHeight = height - top - bottom;
+    const maximum = Math.max(...data.map((item) => Number(item.total || 0)), 1);
+    const step = plotWidth / data.length;
+    const barWidth = Math.max(Math.min(step * .54, 74), 10);
+    const baseline = top + plotHeight;
+    let content = '';
+    content += `<defs><pattern id="analytics-negative-pattern" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="7" height="7" fill="#d55e00"></rect><line x1="0" y1="0" x2="0" y2="7" stroke="rgba(255,255,255,.45)" stroke-width="2"></line></pattern></defs>`;
+    for (let tick = 0; tick <= 4; tick += 1) {
+        const value = Math.round(maximum * tick / 4);
+        const tickY = baseline - plotHeight * tick / 4;
+        content += `<line class="chart-gridline" x1="${left}" y1="${tickY}" x2="${width - right}" y2="${tickY}" />
+            <text class="chart-label" x="${left - 8}" y="${tickY + 4}" text-anchor="end">${value}</text>`;
+    }
+    content += `<line class="chart-axis" x1="${left}" y1="${baseline}" x2="${width - right}" y2="${baseline}" />`;
+    data.forEach((item, index) => {
+        const x = left + index * step + (step - barWidth) / 2;
+        const negative = Math.max(Number(item.negative || 0), 0);
+        const nonnegative = Math.max(Number(item.total || 0) - negative, 0);
+        const negativeHeight = negative / maximum * plotHeight;
+        const nonnegativeHeight = nonnegative / maximum * plotHeight;
+        const totalHeight = negativeHeight + nonnegativeHeight;
+        const center = x + barWidth / 2;
+        content += `<rect class="pulse-nonnegative" x="${x}" y="${baseline - totalHeight}" width="${barWidth}" height="${nonnegativeHeight}" rx="5"><title>${escapeHTML(vizTimeLabel(item.start, true))}：非负面 ${nonnegative} 条</title></rect>
+            <rect class="pulse-negative" x="${x}" y="${baseline - negativeHeight}" width="${barWidth}" height="${negativeHeight}" rx="5"><title>${escapeHTML(vizTimeLabel(item.start, true))}：负面筛查 ${negative} 条</title></rect>
+            <text class="pulse-total-label" x="${center}" y="${Math.max(baseline - totalHeight - 9, 14)}" text-anchor="middle">${item.total}</text>
+            <text class="chart-label" x="${center}" y="${baseline + 23}" text-anchor="middle">${escapeHTML(vizTimeLabel(item.start, true))}</text>
+            <text class="pulse-risk-label" x="${center}" y="${baseline + 43}" text-anchor="middle">风险词 ${item.total ? Math.round(item.risk / item.total * 100) : 0}%</text>`;
+    });
+    const peak = data.reduce((best, item) => Number(item.total || 0) > Number(best.total || 0) ? item : best, data[0]);
+    const totalSignals = data.reduce((sum, item) => sum + Number(item.total || 0), 0);
+    const totalNegative = data.reduce((sum, item) => sum + Number(item.negative || 0), 0);
+    const negativeRatio = totalNegative / Math.max(totalSignals, 1) * 100;
+    host.innerHTML = svgShell(
+        width,
+        height,
+        '监测项目信号构成与负面强度',
+        '每个时间窗使用共同零基线。橙色斜线段表示负面筛查，蓝色实色段表示其他信号，两段相加等于全部信号。',
+        content,
+    ) + `<div class="pulse-readout"><span><small>峰值窗口</small><strong>${escapeHTML(vizTimeLabel(peak.start, true))} · ${fmtNumber(peak.total)} 条</strong></span><span><small>当前范围负面筛查</small><strong>${negativeRatio.toFixed(1)}%</strong></span></div>
+        <div class="chart-legend"><span><i class="legend-mark analytics-other"></i>非负面信号</span><span><i class="legend-mark analytics-hatched"></i>负面筛查</span><span>柱顶数字＝全部信号</span></div>`
+        + chartTable(
+            ['时间窗', '全部信号', '负面筛查', '非负面信号', '风险词信号'],
+            data.map((item) => [vizTimeLabel(item.start, true), item.total, item.negative, Math.max(item.total - item.negative, 0), item.risk]),
+            '监测项目信号构成底层数据',
+        );
+}
+
+function renderAnalyticsEventRanking(events) {
+    const host = document.getElementById('analytics-event-ranking');
+    if (!events.length) {
+        host.innerHTML = empty('当前样本尚未形成可比较的聚合事件。');
+        return;
+    }
+    host.innerHTML = events.slice(0, 6).map((item, index) => `
+        <article class="event-priority-card${Number(item.negative_ratio || 0) >= 80 ? ' high' : ''}">
+            <div class="event-priority-head"><span>EVENT ${String(index + 1).padStart(2, '0')}</span><strong>热度 ${escapeHTML(item.heat_score || 0)}</strong></div>
+            <button class="text-button" data-action="view-event" data-id="${escapeHTML(item.id)}">${escapeHTML(item.title)}</button>
+            <div class="event-priority-stats"><span><strong>${fmtNumber(item.sample_count)}</strong>证据样本</span><span><strong>${fmtNumber(item.source_count)}</strong>来源类型</span><span><strong>${escapeHTML(trendNames[item.trend] || item.trend || '未知')}</strong>当前趋势</span></div>
+            <div class="event-risk-row"><span>负面筛查</span><strong>${escapeHTML(item.negative_ratio)}%</strong></div>
+            <div class="event-risk-track" role="img" aria-label="${escapeHTML(item.title)}负面筛查 ${escapeHTML(item.negative_ratio)}%"><span style="width:${Math.max(Math.min(Number(item.negative_ratio || 0), 100), 0)}%"></span></div>
+        </article>`).join('');
+}
+
+function renderAnalyticsSources(sources) {
+    const host = document.getElementById('analytics-sources');
+    if (!sources.length) {
+        host.innerHTML = empty('当前项目没有可统计的数据来源。');
+        return;
+    }
+    const compositionLabel = sources.map((item) => `${item.label} ${item.share}%`).join('，');
+    host.innerHTML = `<div class="source-composition" role="img" aria-label="来源构成：${escapeHTML(compositionLabel)}">${sources.map((item, index) => `<span class="source-tone-${index % 5}" style="width:${Math.max(Number(item.share || 0), .5)}%"><i>${Number(item.share || 0) >= 16 ? `${escapeHTML(item.share)}%` : ''}</i></span>`).join('')}</div>
+        <div class="source-legend-list">${sources.map((item, index) => `
+            <article class="source-legend-row">
+                <i class="source-dot source-tone-${index % 5}"></i>
+                <div><strong>${escapeHTML(item.label)}</strong><small>负面筛查 ${escapeHTML(item.negative_ratio)}% · 互动量 ${fmtNumber(item.engagement)}</small></div>
+                <span><strong>${fmtNumber(item.count)}</strong><small>${escapeHTML(item.share)}%</small></span>
+            </article>`).join('')}</div>` + chartTable(
+        ['来源', '样本数', '样本占比', '负面筛查占比', '互动量'],
+        sources.map((item) => [item.label, item.count, `${item.share}%`, `${item.negative_ratio}%`, item.engagement]),
+        '当前监测项目来源结构完整数据',
+    );
+}
+
+function renderAnalyticsReadiness(readiness) {
+    const host = document.getElementById('analytics-readiness');
+    const definitions = [
+        ['lda', 'LDA 主题', `${fmtNumber(readiness.documents)} 篇有效文本`],
+        ['arima', 'ARIMA 趋势', `${fmtNumber(readiness.observed_days)} 个观测日`],
+        ['sir', 'SIR 情景', `${fmtNumber(readiness.observed_days)} 个观测日`],
+    ];
+    host.innerHTML = definitions.map(([key, label, current]) => {
+        const item = readiness[key] || {};
+        return `<article class="readiness-card ${item.available ? 'ready' : 'blocked'}">
+            <div><strong>${escapeHTML(label)}</strong>${statusBadge(item.available ? 'succeeded' : 'paused')}</div>
+            <p>${escapeHTML(current)} · 最低要求 ${escapeHTML(item.minimum)}</p>
+            <small>${escapeHTML(item.note || '')}</small>
+        </article>`;
+    }).join('');
+}
+
+function analysisResultHTML(job) {
+    if (!job) return empty('还没有运行当前项目的高级实验模型。');
+    if (job.error_message) {
+        return `<div class="notice error"><strong>${escapeHTML(job.error_code || 'analysis_failed')}</strong> · ${escapeHTML(job.error_message)}</div>`;
+    }
+    if (!job.result) {
+        return `<div class="notice">${statusBadge(job.status)} 分析任务进度 ${escapeHTML(job.progress)}%，页面会自动刷新。</div>`;
+    }
+    const result = job.result;
+    const summary = result.summary || {};
+    const sections = [`<article><strong>摘要与词频</strong><p>样本 ${fmtNumber(summary.sample_count)} 条，负面筛查 ${escapeHTML(summary.negative_ratio || 0)}%。</p><small>${(summary.top_words || []).slice(0, 8).map((item) => escapeHTML(Array.isArray(item) ? item[0] : item.word)).join('、') || '暂无高频词'}</small></article>`];
+    for (const [key, label] of [['lda', 'LDA 主题'], ['arima', 'ARIMA 趋势'], ['sir', 'SIR 情景']]) {
+        const item = result[key];
+        if (!item) continue;
+        const note = item.available === false
+            ? item.reason
+            : key === 'lda'
+                ? `${(item.topics || []).length} 个主题，轮廓系数 ${item.silhouette_score ?? '未提供'}`
+                : key === 'arima'
+                    ? `${item.observed_points || 0} 个观测点，预测 ${item.forecast?.length || 0} 期`
+                    : `峰值日 ${item.peak_day ?? '未提供'}，拟合 NRMSE ${item.fit_nrmse ?? '未提供'}`;
+        sections.push(`<article class="${item.available === false ? 'blocked' : ''}"><strong>${escapeHTML(label)}</strong><p>${escapeHTML(note || '分析已完成')}</p><small>${escapeHTML(item.claim_scope || '实验模型结果必须结合原始证据人工解释。')}</small></article>`);
+    }
+    return `<div class="analysis-result-head"><span>最近任务</span>${statusBadge(job.status)}</div><div class="analysis-result-grid">${sections.join('')}</div>`;
+}
+
+async function loadAnalytics() {
+    const monitorId = analyticsMonitorId() || monitors[0]?.id || '';
+    const select = document.getElementById('analytics-monitor');
+    if (monitorId && select) select.value = monitorId;
+    document.getElementById('analysis-monitor-id').value = monitorId;
+    if (!monitorId) {
+        document.getElementById('analytics-content').classList.add('hidden');
+        const emptyHost = document.getElementById('analytics-empty');
+        emptyHost.classList.remove('hidden');
+        emptyHost.innerHTML = '<strong>还没有监测项目</strong><span>请先创建监测项目并接入数据，再进入分析实验室。</span>';
+        return;
+    }
+    const data = await api(`/api/v2/analytics?monitor_id=${encodeURIComponent(monitorId)}`);
+    renderAnalyticsProvenance(data);
+    document.getElementById('analytics-signals').textContent = fmtNumber(data.summary.signals);
+    document.getElementById('analytics-negative').textContent = `${Number(data.summary.negative_ratio || 0).toFixed(1)}%`;
+    document.getElementById('analytics-negative-count').textContent = `${fmtNumber(data.summary.negative)} 条负面筛查`;
+    document.getElementById('analytics-sources-count').textContent = fmtNumber((data.sources || []).length);
+    document.getElementById('analytics-events-count').textContent = fmtNumber(data.summary.events);
+    const emptyHost = document.getElementById('analytics-empty');
+    const content = document.getElementById('analytics-content');
+    const hasSignals = Number(data.summary.signals || 0) > 0;
+    emptyHost.classList.toggle('hidden', hasSignals);
+    content.classList.toggle('hidden', !hasSignals);
+    if (!hasSignals) {
+        emptyHost.innerHTML = '<strong>当前监测项目还没有匹配信号</strong><span>运行监测、导入带来源的数据，或切换到已有数据的监测项目。</span>';
+        return;
+    }
+    renderAnalyticsWordCloud(data.top_words || []);
+    renderAnalyticsTrend(data.timeline || []);
+    renderAnalyticsEventRanking(data.events || []);
+    renderAnalyticsSources(data.sources || []);
+    renderAnalyticsReadiness(data.readiness || {});
+    await loadAnalysis();
+}
+
 async function loadAnalysis() {
     const jobs = await api('/api/v1/analysis-jobs');
-    document.getElementById('analysis-rows').innerHTML = jobs.length ? jobs.map((job) => {
+    const monitorId = analyticsMonitorId();
+    const scopedJobs = jobs.filter((job) => (job.params || {}).monitor_id === monitorId);
+    document.getElementById('analysis-result').innerHTML = analysisResultHTML(scopedJobs[0]);
+    document.getElementById('analysis-rows').innerHTML = scopedJobs.length ? scopedJobs.map((job) => {
         const summary = job.result?.summary;
         const detail = job.error_message
             ? `<strong>${escapeHTML(job.error_code || 'error')}</strong><small>${escapeHTML(job.error_message)}</small>`
             : summary ? `负面筛查 ${escapeHTML(summary.negative_ratio)}%` : '等待任务更新';
         return `<tr>
             <td>${fmtTime(job.created_at)}</td>
+            <td>${escapeHTML(monitorName((job.params || {}).monitor_id))}</td>
             <td>${escapeHTML(job.analysis_type)}</td>
             <td>${statusBadge(job.status)}</td>
             <td>${summary?.sample_count ?? '—'}</td>
             <td>${detail}</td>
         </tr>`;
-    }).join('') : '<tr><td colspan="5" class="empty-cell">还没有实验分析任务</td></tr>';
+    }).join('') : '<tr><td colspan="6" class="empty-cell">当前监测项目还没有实验分析任务</td></tr>';
 }
 
 async function loadReports() {
@@ -587,7 +814,8 @@ async function refreshCurrent() {
         signals: loadSignals,
         events: loadEvents,
         alerts: loadAlerts,
-        data: async () => Promise.all([loadCollection(), loadAnalysis()]),
+        analytics: loadAnalytics,
+        data: loadCollection,
         reports: loadReports,
         settings: loadSettings
     }[section];
@@ -607,7 +835,8 @@ document.querySelectorAll('[data-refresh]').forEach((button) => {
         const loader = {
             overview: loadOverview,
             monitors: loadMonitors,
-            data: async () => Promise.all([loadCollection(), loadAnalysis()]),
+            analytics: loadAnalytics,
+            data: loadCollection,
             reports: loadReports
         }[button.dataset.refresh];
         if (loader) loader().catch((error) => notify(error.message, true));
@@ -658,6 +887,13 @@ document.getElementById('alert-filter').addEventListener('submit', (event) => {
     event.preventDefault();
     loadAlerts().catch((error) => notify(error.message, true));
 });
+document.getElementById('analytics-filter').addEventListener('submit', (event) => {
+    event.preventDefault();
+    loadAnalytics().catch((error) => notify(error.message, true));
+});
+document.getElementById('analytics-monitor').addEventListener('change', () => {
+    loadAnalytics().catch((error) => notify(error.message, true));
+});
 
 document.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-action]');
@@ -683,6 +919,11 @@ document.addEventListener('click', async (event) => {
             activateSection('events');
             document.getElementById('event-monitor').value = button.dataset.id;
             await loadEvents();
+        } else if (button.dataset.action === 'open-monitor-analytics') {
+            activateSection('analytics');
+            document.getElementById('analytics-monitor').value = button.dataset.id;
+            document.getElementById('analysis-monitor-id').value = button.dataset.id;
+            await loadAnalytics();
         } else if (button.dataset.action === 'view-event') {
             await openEvent(button.dataset.id);
         } else if (button.dataset.action === 'create-brief') {
@@ -753,11 +994,14 @@ document.getElementById('analysis-form').addEventListener('submit', async (event
     event.preventDefault();
     const formElement = event.currentTarget;
     try {
+        const monitorId = analyticsMonitorId();
+        if (!monitorId) throw new Error('请先选择监测项目');
+        document.getElementById('analysis-monitor-id').value = monitorId;
         await api('/api/v1/analysis-jobs', {
             method: 'POST',
             body: JSON.stringify(Object.fromEntries(new FormData(formElement)))
         });
-        notify('实验分析任务已创建');
+        notify('当前监测项目的实验分析任务已创建');
         await loadAnalysis();
     } catch (error) {
         notify(error.message, true);
@@ -806,7 +1050,7 @@ document.getElementById('logout').addEventListener('click', async () => {
         await loadSession();
         await loadMonitors();
         activateSection(location.hash.slice(1) || 'overview');
-        await Promise.all([loadCollection(), loadAnalysis(), loadReports()]);
+        await Promise.all([loadCollection(), loadReports()]);
         refreshTimer = window.setInterval(() => {
             if (!document.hidden) {
                 refreshCurrent().catch((error) => notify(error.message, true));

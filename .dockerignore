@@ -1,7 +1,12 @@
+# Git 仓库元数据和 GitHub 配置不进入镜像。
 .git
 .github
+
+# 本机环境变量文件可能包含密钥，禁止复制到镜像。
 .env
 .env.*
+
+# Python 缓存、测试缓存和覆盖率文件不进入镜像。
 __pycache__
 *.py[cod]
 *.db
@@ -10,11 +15,15 @@ __pycache__
 .pytest_cache
 .coverage
 htmlcov
+
+# 运行数据、外部采集器和训练产物通过独立方式提供。
 runtime
 external
 models/saved
 data/*
 !data/stopwords.txt
+
+# 生产镜像不需要文档、测试和创意展示源文件。
 docs
 tests
 创意展示.html

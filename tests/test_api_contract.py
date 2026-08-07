@@ -9,6 +9,7 @@ import config
 from scripts.run_pipeline import prepare_textcnn_data
 from scripts.generate_data import generate_dataset
 from storage import mongo_client
+from storage.product_store import reset_store_cache
 from web.app import app
 
 
@@ -29,6 +30,7 @@ class ApiContractTest(unittest.TestCase):
             'MODEL_DIR': config.MODEL_DIR,
             'DATASET_METADATA_PATH': config.DATASET_METADATA_PATH,
             'MODEL_METRICS_PATH': config.MODEL_METRICS_PATH,
+            'PRODUCT_DB_PATH': config.PRODUCT_DB_PATH,
             'MONGO_ENABLED': config.MONGO_ENABLED,
         }
         config.RAW_DATA_DIR = str(self.raw_dir)
@@ -36,6 +38,7 @@ class ApiContractTest(unittest.TestCase):
         config.MODEL_DIR = str(self.model_dir)
         config.DATASET_METADATA_PATH = str(self.raw_dir / 'metadata.json')
         config.MODEL_METRICS_PATH = str(self.processed_dir / 'model_metrics.json')
+        config.PRODUCT_DB_PATH = str(self.root / 'product.db')
         config.MONGO_ENABLED = False
         self._reset_storage()
         self._write_fixtures()
@@ -51,6 +54,7 @@ class ApiContractTest(unittest.TestCase):
 
     @staticmethod
     def _reset_storage():
+        reset_store_cache()
         mongo_client.db.close()
         mongo_client.db.client = None
         mongo_client.db.db = None

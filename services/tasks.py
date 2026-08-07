@@ -213,10 +213,46 @@ def run_analysis_job(job_id):
     )
     try:
         params = job.get('params', {})
-        posts = store.list_posts(
-            topic=params.get('topic'), start_date=params.get('start_date'),
-            end_date=params.get('end_date'), limit=100000
-        )
+        monitor_id = params.get('monitor_id')
+        if monitor_id:
+            from storage.monitor_store import get_monitor_store
+            monitor_store = get_monitor_store(product_store=store)
+            posts = []
+            offset = 0
+            while len(posts) < 100000:
+                page = monitor_store.list_signals(
+                    monitor_id,
+                    limit=min(500, 100000 - len(posts)),
+                    offset=offset,
+                )
+                if not page:
+                    break
+                posts.extend(page)
+                offset += len(page)
+            start_date = params.get('start_date')
+            end_date = params.get('end_date')
+            if start_date or end_date:
+                posts = [
+                    item for item in posts
+                    if (
+                        (item.get('published_at') or item.get('fetched_at') or '')[:10]
+                        and (
+                            not start_date
+                            or (item.get('published_at') or item.get('fetched_at'))[:10]
+                            >= start_date
+                        )
+                        and (
+                            not end_date
+                            or (item.get('published_at') or item.get('fetched_at'))[:10]
+                            <= end_date
+                        )
+                    )
+                ]
+        else:
+            posts = store.list_posts(
+                topic=params.get('topic'), start_date=params.get('start_date'),
+                end_date=params.get('end_date'), limit=100000
+            )
         if not posts:
             store.update_analysis_job(
                 job_id, status='failed', progress=100,
@@ -236,7 +272,8 @@ def run_analysis_job(job_id):
             result['sir'] = _sir_analysis(posts)
         if not _still_active(store.get_analysis_job(job_id)):
             return
-        _refresh_alerts(store, posts)
+        if not monitor_id:
+            _refresh_alerts(store, posts)
         store.update_analysis_job(
             job_id, status='succeeded', progress=100, result_json=result,
             finished_at=utc_now()

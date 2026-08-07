@@ -1,5 +1,5 @@
-# Direct dependency lock verified with Conda cv / Python 3.10.20 on 2026-07-22.
-# Transitive dependencies are resolved by pip for the target platform.
+# 直接依赖锁定版本已于 2026-07-22 在 Conda cv / Python 3.10.20 中验证。
+# 间接依赖由 pip 根据目标平台解析。
 requests==2.34.2
 beautifulsoup4==4.15.0
 lxml==6.1.1

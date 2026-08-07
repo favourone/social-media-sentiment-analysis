@@ -22,7 +22,7 @@ venv/
 .env.local
 .env.*.local
 
-# IDE配置
+# IDE 配置
 .vscode/
 .idea/
 *.swp
@@ -35,7 +35,7 @@ Thumbs.db
 # 日志文件
 *.log
 
-# Jupyter Notebook
+# Jupyter Notebook 文件
 *.ipynb
 
 # 临时文件

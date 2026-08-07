@@ -1,29 +1,29 @@
-# Runtime dependencies actually imported by the project.
+# 项目运行时实际使用的直接依赖。
 
-# Optional data collection
+# 可选数据采集
 requests>=2.28,<3
 beautifulsoup4>=4.11,<5
 lxml>=4.9
 
-# Optional MongoDB backend (local JSON is the default)
+# 可选 MongoDB 后端（默认使用本地 JSON）
 pymongo>=4.3,<5
 
-# NLP and evaluation
+# 自然语言处理与评估
 jieba>=0.42.1,<1
 numpy>=1.23
 scikit-learn>=1.2
 gensim>=4.3,<5
 
-# Models
+# 模型
 torch>=2.0
 statsmodels>=0.14,<1
 scipy>=1.10
 
-# Web API
+# Web 接口
 Flask>=2.3,<4
 Flask-Cors>=4,<7
 
-# Product workflow, jobs and exports
+# 产品工作流、任务队列与报告导出
 python-dotenv>=1.0,<2
 redis>=5,<6
 rq>=2,<3

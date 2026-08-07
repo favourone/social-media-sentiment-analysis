@@ -2,7 +2,7 @@
 """
 Flask Web 应用
 ==============
-舆情监控大屏后端，提供 RESTful API 和页面渲染
+校园公共安全与民生服务舆情大屏后端，提供 RESTful API 和页面渲染
 支持时间范围筛选和话题筛选
 """
 
@@ -14,7 +14,7 @@ from datetime import date, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 
-from flask import Flask, render_template, jsonify, request, redirect, session, url_for
+from flask import Flask, jsonify, request, redirect, session, url_for
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -176,18 +176,14 @@ def filter_comments(comments, allowed_post_ids, start_date=None, end_date=None):
 
 @app.route('/')
 def index():
-    """舆情监控大屏首页"""
-    if not session.get('admin_id'):
-        return redirect(url_for('product.login_page'))
-    return render_template('index.html')
+    """统一进入校园舆情雷达工作台。"""
+    return redirect(url_for('product.workspace'))
 
 
 @app.route('/dashboard')
 def dashboard():
-    """Authenticated legacy visualization dashboard."""
-    if not session.get('admin_id'):
-        return redirect(url_for('product.login_page'))
-    return render_template('index.html')
+    """兼容旧书签，并跳转到已整合的分析实验室。"""
+    return redirect(f"{url_for('product.workspace')}#analytics")
 
 
 @app.route('/api/overview')
@@ -637,7 +633,7 @@ def api_topics():
 def run_web():
     """启动 Web 应用"""
     print("=" * 60)
-    print("  🌐 舆情监控大屏启动中...")
+    print("  🌐 校园舆情雷达启动中...")
     print(f"  访问地址：http://localhost:{config.WEB_PORT}")
     print("=" * 60)
 

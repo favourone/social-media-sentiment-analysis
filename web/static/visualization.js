@@ -411,7 +411,7 @@ async function loadCompetitionStory() {
 
 async function seedCompetitionDemo() {
     const accepted = window.confirm(
-        '将向本地数据库加入 54 条明确标记的合成校园案例，用于离线演示。不会删除或冒充真实数据。是否继续？'
+        '将向本地数据库加入 54 条明确标记的高校校园公共安全与民生服务合成案例，用于离线演示。不会删除或冒充真实数据。是否继续？'
     );
     if (!accepted) return;
     const result = await api('/api/v2/demo/seed', {method: 'POST'});

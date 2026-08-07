@@ -390,6 +390,13 @@ def create_analysis_job():
         filters = _filters(payload)
     except ValueError as exc:
         return error('invalid_filter', str(exc), 400)
+    monitor_id = str(payload.get('monitor_id', '')).strip()
+    if monitor_id:
+        from storage.monitor_store import get_monitor_store
+        if not get_monitor_store().get_monitor(monitor_id):
+            return error('invalid_monitor', '请选择有效的监测项目', 400)
+        filters['monitor_id'] = monitor_id
+        filters['topic'] = None
     store = get_product_store()
     job = store.create_analysis_job(analysis_type, filters)
     if _dispatch('services.tasks.run_analysis_job', job['id']) is None:

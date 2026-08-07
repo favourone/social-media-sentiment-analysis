@@ -1,4 +1,5 @@
 services:
+  # Redis 保存 RQ 任务队列，并通过 AOF 提供持久化。
   redis:
     image: redis:7.4-alpine
     command: ["redis-server", "--appendonly", "yes"]
@@ -11,6 +12,7 @@ services:
       timeout: 3s
       retries: 10
 
+  # Web 服务使用 Waitress 对外提供页面和 API。
   web:
     build: .
     restart: unless-stopped
@@ -30,6 +32,7 @@ services:
       redis:
         condition: service_healthy
 
+  # Worker 串行执行采集、分析和报告生成等耗时任务。
   worker:
     build: .
     restart: unless-stopped
@@ -48,6 +51,7 @@ services:
       redis:
         condition: service_healthy
 
+  # Scheduler 定期扫描到期监测项目，并将任务送入 RQ 队列。
   scheduler:
     build: .
     restart: unless-stopped
@@ -67,5 +71,7 @@ services:
         condition: service_healthy
 
 volumes:
+  # 保存 SQLite、导入文件和生成报告。
   app-runtime:
+  # 保存 Redis AOF 队列数据。
   redis-data:
