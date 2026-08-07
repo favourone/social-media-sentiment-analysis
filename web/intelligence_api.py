@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import config
 from flask import Blueprint, request, session
 
+from services.analytics import build_monitor_analytics
 from services.competition_demo import seed_competition_demo
 from services.visualization import build_visual_story
 from storage.monitor_store import ALERT_STATUSES, MONITOR_STATUSES, get_monitor_store
@@ -23,6 +24,23 @@ from web.product_api import (
 
 
 intelligence = Blueprint('intelligence', __name__)
+
+
+def _load_monitor_signals(store, monitor_id, cap=3000):
+    """分页读取一个监测项目的信号，并显式返回截断前总数。"""
+    summary = store.signal_summary(monitor_id)
+    signals = []
+    target = min(summary['total'], cap)
+    while len(signals) < target:
+        page = store.list_signals(
+            monitor_id,
+            limit=min(500, target - len(signals)),
+            offset=len(signals),
+        )
+        if not page:
+            break
+        signals.extend(page)
+    return signals, summary['total']
 
 
 def _terms(value, name, maximum=20):
@@ -177,24 +195,31 @@ def visual_story():
     monitor = store.get_monitor(monitor_id) if monitor_id else None
     if not monitor:
         return error('invalid_monitor', '请选择有效的监测项目', 400)
-    summary = store.signal_summary(monitor_id)
-    cap = 3000
-    signals = []
-    while len(signals) < min(summary['total'], cap):
-        page = store.list_signals(
-            monitor_id,
-            limit=min(500, cap - len(signals)),
-            offset=len(signals),
-        )
-        if not page:
-            break
-        signals.extend(page)
+    signals, total_available = _load_monitor_signals(store, monitor_id)
     return success(build_visual_story(
         monitor,
         signals,
         store.list_events(monitor_id, limit=500),
         store.list_alerts(monitor_id=monitor_id, limit=500),
-        total_available=summary['total'],
+        total_available=total_available,
+    ))
+
+
+@intelligence.get('/api/v2/analytics')
+@login_required_api
+def monitor_analytics():
+    """返回严格限定在一个监测项目内的分析实验室数据。"""
+    monitor_id = str(request.args.get('monitor_id', '')).strip()
+    store = get_monitor_store()
+    monitor = store.get_monitor(monitor_id) if monitor_id else None
+    if not monitor:
+        return error('invalid_monitor', '请选择有效的监测项目', 400)
+    signals, total_available = _load_monitor_signals(store, monitor_id)
+    return success(build_monitor_analytics(
+        monitor,
+        signals,
+        store.list_events(monitor_id, limit=500),
+        total_available=total_available,
     ))
 
 

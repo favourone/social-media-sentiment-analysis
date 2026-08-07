@@ -11,24 +11,24 @@ from storage.product_store import get_product_store, utc_now
 
 
 DATASET_ID = 'campus-public-opinion-v3'
-DEMO_MONITOR_NAME = '校园公共事件｜国赛演示'
+DEMO_MONITOR_NAME = '高校校园安全与民生服务｜国赛演示'
 REFERENCE_TIME = datetime(2026, 8, 1, 8, 0, tzinfo=timezone(timedelta(hours=8)))
 
 SCENARIO_CONTEXT = {
     'food': (
-        '【校园餐饮议题】 阶段追踪。'
+        '【校园食品与餐饮安全】 阶段追踪。'
         '专题证据统一记录餐饮线索、部门回应、供应链核查、窗口整改、'
         '留样检测、复核公开、后续监督和处置反馈等阶段信息，'
         '用于演示事件演化。本条动态：'
     ),
     'network': (
-        '【校园信息服务议题】 阶段追踪。'
+        '【校园数字服务保障】 阶段追踪。'
         '专题证据统一记录服务异常、技术排查、设备切换、连接恢复、'
         '状态验证、进度公开、后续观察和处置反馈等阶段信息，'
         '用于演示事件演化。本条动态：'
     ),
     'fraud': (
-        '【校园财务提醒议题】 阶段追踪。'
+        '【校园反诈与缴费安全】 阶段追踪。'
         '专题证据统一记录缴费提醒、信息核验、渠道通报、紧急处置、'
         '进度公开、后续防范和处置反馈等阶段信息，'
         '用于演示事件演化。本条动态：'
@@ -52,7 +52,7 @@ def _record(cluster, index, hour, platform, text, sentiment, engagement):
         'fetched_at': (published + timedelta(minutes=8)).isoformat(),
         'engagement': engagement,
         'source_url': f'https://example.com/competition-demo/{cluster}/{index}',
-        'topic': '校园公共事件',
+        'topic': '校园公共安全与民生服务',
         'sentiment': sentiment,
         'sentiment_method': 'scenario_label_for_demo',
         'raw': {
@@ -132,7 +132,7 @@ def seed_competition_demo(product_store=None, monitor_store=None):
     monitor_store = monitor_store or get_monitor_store()
     records = competition_demo_records()
     job = product_store.create_collection_job(
-        'demo', 'competition_demo', ['校园公共事件'],
+        'demo', 'competition_demo', ['校园公共安全', '校园民生服务'],
         {'dataset_id': DATASET_ID, 'synthetic': True},
     )
     product_store.update_collection_job(
@@ -161,7 +161,7 @@ def seed_competition_demo(product_store=None, monitor_store=None):
     )
     fields = {
         'name': DEMO_MONITOR_NAME,
-        'description': '合成案例：展示校园食品安全、网络故障与反诈提醒的发现、聚合和处置过程。',
+        'description': '合成案例：展示校园食品与餐饮安全、数字服务保障、反诈与缴费安全的发现、聚合、核验和处置过程。',
         'keywords': ['食堂', '食品安全', '校园网', '网络故障', '诈骗', '缴费'],
         'required_terms': [],
         'excluded_terms': ['招聘', '广告'],

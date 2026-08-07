@@ -3,19 +3,20 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>舆情雷达 · 公共事件态势可视化</title>
+    <title>校园舆情雷达 · 高校公共安全与民生服务</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='product.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='visualization.css') }}">
 </head>
 <body>
     <header class="topbar">
-        <a class="brand" href="/workspace"><span class="brand-radar"></span><span>舆情雷达</span><em>V2</em></a>
+        <a class="brand" href="/workspace"><span class="brand-radar"></span><span>校园舆情雷达</span><em>V2</em></a>
         <nav aria-label="主导航">
             <button class="nav-link active" data-section="overview">今日态势</button>
             <button class="nav-link" data-section="monitors">监测项目</button>
             <button class="nav-link" data-section="signals">信号流</button>
             <button class="nav-link" data-section="events">事件中心</button>
             <button class="nav-link" data-section="alerts">预警处置</button>
+            <button class="nav-link" data-section="analytics">分析实验室</button>
             <button class="nav-link" data-section="data">数据接入</button>
             <button class="nav-link" data-section="reports">报告</button>
             <button class="nav-link" data-section="settings">设置</button>
@@ -29,10 +30,10 @@
         <section class="page active" id="section-overview">
             <div class="competition-hero">
                 <div class="hero-copy">
-                    <p class="eyebrow">PUBLIC EVENT INTELLIGENCE</p>
+                    <p class="eyebrow">CAMPUS SAFETY &amp; SERVICE INTELLIGENCE</p>
                     <span class="hero-edition">全国大学生数字媒体科技作品及创意竞赛 · 数据可视化</span>
-                    <h1>让公共事件的<br><span>演化脉络被看见。</span></h1>
-                    <p>从多源信号中发现异常、归并事件、核验证据并记录处置。所有图表均可追溯到当前样本，不把筛查指标包装成事实概率。</p>
+                    <h1>让校园安全与民生服务的<br><span>演化脉络被看见。</span></h1>
+                    <p>聚焦食品与环境安全、校园治安与反诈、设施与数字服务等公开信号，发现异常、归并事件、核验证据并记录处置。所有图表均可追溯到当前样本，不把筛查指标包装成事实概率。</p>
                     <div class="hero-actions">
                         <button class="primary" data-action="seed-demo">载入离线演示案例</button>
                         <button class="secondary" data-goto="monitors">连接真实数据</button>
@@ -116,7 +117,7 @@
 
         <section class="page" id="section-monitors">
             <div class="page-heading">
-                <div><p class="eyebrow">WATCHLISTS</p><h1>监测项目</h1><p>定义关注对象、排除噪声、风险词、数据来源和预警阈值。</p></div>
+                <div><p class="eyebrow">WATCHLISTS</p><h1>监测项目</h1><p>围绕校园公共安全与民生服务，定义关注对象、排除噪声、风险词、数据来源和预警阈值。</p></div>
                 <button class="secondary" data-refresh="monitors">刷新</button>
             </div>
             <div class="monitor-layout">
@@ -188,16 +189,72 @@
             <div id="incident-list" class="incident-list"></div>
         </section>
 
+        <section class="page analytics-page" id="section-analytics">
+            <header class="analytics-hero">
+                <div class="analytics-hero-copy">
+                    <p class="eyebrow">ANALYTICS LAB · EVIDENCE FIRST</p>
+                    <h1>让信号的结构<br><span>一眼可见。</span></h1>
+                    <p>把当前监测项目的关键词、时间变化、事件优先级和来源构成放在同一证据坐标中，不跨项目混算，不用模拟值填补缺口。</p>
+                    <div class="analytics-principles" aria-label="分析原则"><span>同一项目口径</span><span>共同零基线</span><span>可回到原始证据</span></div>
+                </div>
+                <form id="analytics-filter" class="analytics-filter">
+                    <p class="kicker">OBSERVATION TARGET</p>
+                    <h2>当前观察对象</h2>
+                    <label><span>监测项目</span><select id="analytics-monitor" name="monitor_id" class="monitor-select" required></select></label>
+                    <button class="primary" type="submit">刷新当前项目</button>
+                </form>
+                <div id="analytics-provenance" class="provenance-strip analytics-provenance" role="note"></div>
+            </header>
+            <div class="metric-grid analytics-metrics">
+                <article class="metric analytics-metric metric-sample"><div><span>当前样本</span><em>01</em></div><strong id="analytics-signals">—</strong><small>仅限所选监测项目</small></article>
+                <article class="metric analytics-metric metric-negative"><div><span>负面筛查</span><em>02</em></div><strong id="analytics-negative">—</strong><small id="analytics-negative-count">—</small></article>
+                <article class="metric analytics-metric metric-source"><div><span>来源类型</span><em>03</em></div><strong id="analytics-sources-count">—</strong><small>按平台或接入来源</small></article>
+                <article class="metric analytics-metric metric-event"><div><span>聚合事件</span><em>04</em></div><strong id="analytics-events-count">—</strong><small>按内容相似度归并</small></article>
+            </div>
+            <div id="analytics-empty" class="story-empty hidden"></div>
+            <div id="analytics-content" class="dashboard-grid analytics-grid">
+                <article class="panel span-5 analytics-panel term-panel">
+                    <div class="panel-title"><div><p class="kicker">01 · TERM SPECTRUM</p><h2>高频词谱</h2><p>条形长度从零编码出现次数，显示当前样本 Top 10。</p></div><span class="panel-index">WORDS</span></div>
+                    <div id="analytics-word-cloud" class="term-spectrum" aria-label="当前样本高频词排行"></div>
+                </article>
+                <article class="panel span-7 analytics-panel trend-panel">
+                    <div class="panel-title"><div><p class="kicker">02 · SIGNAL PULSE</p><h2>信号构成与负面强度</h2><p>每个时间窗采用共同零基线；负面与非负面堆叠后等于全部信号。</p></div><span class="panel-index">TIME</span></div>
+                    <div id="analytics-trend" class="analytics-chart chart-host"></div>
+                </article>
+                <article class="panel span-7 analytics-panel event-priority-panel">
+                    <div class="panel-title"><div><p class="kicker">03 · EVENT PRIORITY</p><h2>事件优先级卡片</h2><p>同时展示样本量、负面比例与描述性热度；热度不是事件概率。</p></div><span class="panel-index">EVENTS</span></div>
+                    <div id="analytics-event-ranking" class="analytics-ranking"></div>
+                </article>
+                <article class="panel span-5 analytics-panel source-mix-panel">
+                    <div class="panel-title"><div><p class="kicker">04 · SOURCE MIX</p><h2>来源结构</h2><p>宽度按样本占比编码，分类同时使用颜色与直接标签。</p></div><span class="panel-index">SOURCE</span></div>
+                    <div id="analytics-sources" class="analytics-sources"></div>
+                </article>
+                <article class="panel span-12 advanced-panel analytics-model-panel">
+                    <div class="panel-title"><div><p class="kicker">ADVANCED MODELS</p><h2>高级实验模型</h2><p>LDA、ARIMA 与 SIR 只使用当前监测项目的匹配信号，结果不作为事实判断。</p></div></div>
+                    <div id="analytics-readiness" class="readiness-grid"></div>
+                    <form id="analysis-form" class="filter-form advanced-form analytics-model-form">
+                        <input id="analysis-monitor-id" name="monitor_id" type="hidden">
+                        <label>分析类型<select name="type"><option value="summary">摘要与词频</option><option value="full">全部实验模型</option><option value="lda">LDA 主题</option><option value="arima">ARIMA</option><option value="sir">SIR 情景</option></select></label>
+                        <label>开始日期<input name="start_date" type="date"></label>
+                        <label>结束日期<input name="end_date" type="date"></label>
+                        <button class="secondary" type="submit">运行当前项目分析</button>
+                    </form>
+                    <div id="analysis-result" class="analysis-result"></div>
+                    <div class="table-wrap"><table><thead><tr><th>时间</th><th>项目</th><th>类型</th><th>状态</th><th>样本</th><th>说明</th></tr></thead><tbody id="analysis-rows"></tbody></table></div>
+                </article>
+            </div>
+        </section>
+
         <section class="page" id="section-data">
             <div class="page-heading">
                 <div><p class="eyebrow">DATA SOURCES</p><h1>数据接入</h1><p>优先使用公开 RSS、授权微博采集或带来源信息的正式文件。</p></div>
-                <a class="button ghost" href="/dashboard">打开旧分析大屏</a>
+                <button class="button ghost" data-goto="analytics">打开分析实验室</button>
             </div>
             <div class="two-column">
                 <article class="panel">
                     <div class="panel-title"><div><p class="kicker">FILE IMPORT</p><h2>导入现有数据</h2></div></div>
                     <form id="import-form" class="stack-form">
-                        <label>话题名称<input name="topic" placeholder="例如：校园招聘" required></label>
+                        <label>话题名称<input name="topic" placeholder="例如：校园食品与餐饮安全" required></label>
                         <label>数据文件<input name="file" type="file" accept=".json,.jsonl,.ndjson,.csv" required></label>
                         <p class="help">最大 10 MB。正文必填，建议包含原始 ID、作者、时间和来源链接。</p>
                         <button class="secondary" type="submit">上传并入库</button>
@@ -206,7 +263,7 @@
                 <article class="panel">
                     <div class="panel-title"><div><p class="kicker">AUTHORIZED WEIBO</p><h2>一次性微博采集</h2></div></div>
                     <form id="collection-form" class="stack-form">
-                        <label>关键词<input name="keywords" placeholder="人工智能, 大模型" required></label>
+                        <label>关键词<input name="keywords" placeholder="校园网, 食品安全, 反诈" required></label>
                         <label>最大页数<input name="max_pages" type="number" min="1" max="10" value="3" required></label>
                         <label class="check"><input name="confirm" type="checkbox" required><span>仅采集有权访问的公开数据，不绕过验证码和访问控制。</span></label>
                         <button class="primary" type="submit">创建采集任务</button>
@@ -217,22 +274,11 @@
                 <div class="panel-title"><div><p class="kicker">INGEST HISTORY</p><h2>数据接入记录</h2></div><button class="ghost" data-refresh="data">刷新</button></div>
                 <div class="table-wrap"><table><thead><tr><th>创建时间</th><th>来源</th><th>范围</th><th>状态</th><th>进度</th><th>结果 / 原因</th></tr></thead><tbody id="collection-rows"></tbody></table></div>
             </article>
-            <details class="panel advanced-panel">
-                <summary><strong>高级实验分析</strong><span>保留 LDA、ARIMA 与 SIR，结果不作为事实判断</span></summary>
-                <form id="analysis-form" class="filter-form advanced-form">
-                    <label>分析类型<select name="type"><option value="summary">摘要与词频</option><option value="full">全部实验模型</option><option value="lda">LDA 主题</option><option value="arima">ARIMA</option><option value="sir">SIR 情景</option></select></label>
-                    <label>话题<input name="topic" placeholder="留空表示全部"></label>
-                    <label>开始日期<input name="start_date" type="date"></label>
-                    <label>结束日期<input name="end_date" type="date"></label>
-                    <button class="secondary" type="submit">运行实验</button>
-                </form>
-                <div class="table-wrap"><table><thead><tr><th>时间</th><th>类型</th><th>状态</th><th>样本</th><th>说明</th></tr></thead><tbody id="analysis-rows"></tbody></table></div>
-            </details>
         </section>
 
         <section class="page" id="section-reports">
             <div class="page-heading">
-                <div><p class="eyebrow">EVIDENCE EXPORT</p><h1>报告中心</h1><p>导出样本范围、来源、情感筛查结果和解释边界。</p></div>
+                <div><p class="eyebrow">EVIDENCE EXPORT</p><h1>报告中心</h1><p>导出校园事件的样本范围、来源、情感筛查结果和解释边界。</p></div>
             </div>
             <article class="panel filter-panel">
                 <form id="report-form" class="filter-form">
@@ -261,7 +307,7 @@
                 <div class="panel-title"><div><p class="kicker">DELIVERY AUDIT</p><h2>最近通知</h2></div></div>
                 <div id="delivery-list" class="compact-list"></div>
             </article>
-            <article class="panel compliance"><h2>数据与模型边界</h2><p>系统不绕过登录、验证码或访问控制。词典情感、聚类和热度评分都是筛查工具；可选模型生成的每份简报必须引用当前数据库中的信号 ID。商业使用前请换用获得授权的数据接口并完成独立安全评估。</p></article>
+            <article class="panel compliance"><h2>数据与模型边界</h2><p>系统只处理依法可用的校园公开信息或已授权、已脱敏数据，不采集私人聊天，不对个人自动定性，也不绕过登录、验证码或访问控制。词典情感、聚类和热度评分都是筛查工具；可选模型生成的每份简报必须引用当前数据库中的信号 ID。商业使用前请换用获得授权的数据接口并完成独立安全评估。</p></article>
         </section>
     </main>
 
