@@ -17,6 +17,7 @@ import subprocess
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections import Counter
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -85,16 +86,165 @@ def _timestamp(value):
     return text[:64]
 
 
-POSITIVE_WORDS = {'支持', '喜欢', '优秀', '进步', '成功', '满意', '点赞', '期待'}
-NEGATIVE_WORDS = {'反对', '失望', '问题', '风险', '失败', '投诉', '愤怒', '质疑'}
+POSITIVE_WORDS = {
+    '支持', '喜欢', '优秀', '进步', '成功', '满意', '点赞', '期待', '改善', '及时',
+    '负责', '放心', '顺利', '感谢', '好评', '安全', '解决', '稳定', '清晰', '便利'
+}
+NEGATIVE_WORDS = {
+    '反对', '失望', '问题', '风险', '失败', '投诉', '愤怒', '质疑', '崩溃', '故障',
+    '延误', '拥堵', '停水', '停电', '漏水', '异味', '变质', '腹泻', '诈骗', '冒充',
+    '转账', '火灾', '打架', '丢失', '失联', '危险', '隐患', '无法', '不能', '打不开'
+}
+RISK_WORDS = {
+    '中毒', '腹泻', '异味', '变质', '诈骗', '冒充', '转账', '火灾', '打架', '失联',
+    '泄露', '坍塌', '爆炸', '聚集', '投诉', '举报', '恐慌', '谣言', '危险', '隐患'
+}
+NEGATION_WORDS = {'不', '没', '没有', '无', '未', '并非', '不是', '别'}
+INTENSIFIERS = {'很', '非常', '特别', '严重', '大量', '持续', '反复', '多次', '集中'}
+SENTIMENT_ALGORITHM_VERSION = 'transparent_lexicon_v2'
+QUALITY_ALGORITHM_VERSION = 'record_quality_v1'
+
+
+def _hits(text, words):
+    return [word for word in sorted(words, key=len, reverse=True) if word in text]
+
+
+def score_sentiment(text, raw_value=None):
+    """Return a transparent sentiment screen while keeping binary compatibility."""
+    value = str(text or '')
+    if raw_value in (0, 1, '0', '1'):
+        label = int(raw_value)
+        return {
+            'label': label,
+            'score': -70 if label == 0 else 70,
+            'confidence': 'high',
+            'method': 'source_label',
+            'algorithm_version': SENTIMENT_ALGORITHM_VERSION,
+            'evidence': {
+                'source_label': label,
+                'positive_terms': [],
+                'negative_terms': [],
+                'risk_terms': [],
+                'negation_terms': [],
+                'intensifiers': [],
+            },
+            'caveats': ['优先采用来源提供的情感标签，仍需结合原文人工复核。'],
+        }
+    positive_terms = _hits(value, POSITIVE_WORDS)
+    negative_terms = _hits(value, NEGATIVE_WORDS)
+    risk_terms = _hits(value, RISK_WORDS)
+    negation_terms = _hits(value, NEGATION_WORDS)
+    intensifiers = _hits(value, INTENSIFIERS)
+    positive = sum(value.count(word) for word in positive_terms)
+    negative = sum(value.count(word) for word in negative_terms)
+    risk = sum(value.count(word) for word in risk_terms)
+    negation = min(sum(value.count(word) for word in negation_terms), 3)
+    intensity = min(sum(value.count(word) for word in intensifiers), 4)
+    raw_score = positive * 16 - negative * 18 - risk * 24
+    if negative or risk:
+        raw_score -= intensity * 6
+    elif positive:
+        raw_score += intensity * 4
+    # In public-opinion screening, negation words often reduce the certainty of a
+    # lexicon hit more safely than reversing polarity with no syntax parser.
+    if negation and (negative or risk):
+        raw_score += min(negation * 10, 24)
+    score = max(-100, min(100, raw_score))
+    label = 0 if score < 0 else 1
+    absolute = abs(score)
+    confidence = 'high' if absolute >= 45 else 'medium' if absolute >= 18 else 'low'
+    method = SENTIMENT_ALGORITHM_VERSION if confidence != 'low' else f'{SENTIMENT_ALGORITHM_VERSION}_low_confidence'
+    caveats = ['透明词典筛查只用于发现疑似风险，不代表人工标注或事实结论。']
+    if confidence == 'low':
+        caveats.append('词典证据较弱，建议优先查看原文语境。')
+    return {
+        'label': label,
+        'score': int(score),
+        'confidence': confidence,
+        'method': method,
+        'algorithm_version': SENTIMENT_ALGORITHM_VERSION,
+        'evidence': {
+            'positive_terms': positive_terms,
+            'negative_terms': negative_terms,
+            'risk_terms': risk_terms,
+            'negation_terms': negation_terms,
+            'intensifiers': intensifiers,
+        },
+        'caveats': caveats,
+    }
 
 
 def infer_sentiment(text, raw_value=None):
-    if raw_value in (0, 1, '0', '1'):
-        return int(raw_value), 'source_label'
-    positive = sum(text.count(word) for word in POSITIVE_WORDS)
-    negative = sum(text.count(word) for word in NEGATIVE_WORDS)
-    return (0 if negative > positive else 1), 'transparent_lexicon_baseline'
+    result = score_sentiment(text, raw_value)
+    return result['label'], result['method']
+
+
+def _algorithm_bucket(record):
+    raw = dict(record or {})
+    bucket = raw.get('_algorithm')
+    if not isinstance(bucket, dict):
+        bucket = {}
+    raw['_algorithm'] = bucket
+    return raw, bucket
+
+
+def assess_record_quality(post, source_record=None, generated_source_id=False):
+    flags = []
+    text = str(post.get('text') or '')
+    if not post.get('published_at'):
+        flags.append('missing_published_at')
+    if not post.get('author'):
+        flags.append('missing_author')
+    if not post.get('source_url'):
+        flags.append('missing_source_url')
+    if len(text) < 12:
+        flags.append('short_text')
+    if generated_source_id:
+        flags.append('generated_source_id')
+    sentiment = (post.get('raw') or {}).get('_algorithm', {}).get('sentiment', {})
+    method = sentiment.get('method') or post.get('sentiment_method')
+    if method == 'source_label':
+        flags.append('source_sentiment_label_used')
+    elif method:
+        flags.append('lexicon_sentiment_used')
+    if source_record and source_record.get('feed_url') and not source_record.get('url'):
+        flags.append('rss_missing_item_link')
+    return flags
+
+
+def summarize_quality(posts, rejected=0, duplicates=0, source_files=None, comments=None, extra=None):
+    flag_counts = Counter()
+    method_counts = Counter()
+    confidence_counts = Counter()
+    score_values = []
+    for post in posts or []:
+        algorithm = (post.get('raw') or {}).get('_algorithm') or {}
+        flag_counts.update(algorithm.get('quality_flags') or [])
+        sentiment = algorithm.get('sentiment') or {}
+        method_counts.update([sentiment.get('method') or post.get('sentiment_method') or '未记录'])
+        confidence_counts.update([sentiment.get('confidence') or '未记录'])
+        if isinstance(sentiment.get('score'), (int, float)):
+            score_values.append(sentiment['score'])
+    summary = {
+        'algorithm_version': QUALITY_ALGORITHM_VERSION,
+        'valid_posts': len(posts or []),
+        'valid_comments': len(comments or []),
+        'rejected_records': int(rejected or 0),
+        'duplicate_records': int(duplicates or 0),
+        'source_file_count': len(source_files or []),
+        'quality_flags': dict(flag_counts.most_common()),
+        'sentiment_methods': dict(method_counts.most_common()),
+        'sentiment_confidence': dict(confidence_counts.most_common()),
+    }
+    if score_values:
+        summary['sentiment_score'] = {
+            'min': min(score_values),
+            'max': max(score_values),
+            'average': round(sum(score_values) / len(score_values), 1),
+        }
+    if extra:
+        summary.update(extra)
+    return summary
 
 
 def normalize_post(record, platform='weibo', topic=None):
@@ -104,16 +254,20 @@ def normalize_post(record, platform='weibo', topic=None):
     source_id = str(_first(
         record, 'source_id', 'post_id', 'id', 'note_id', 'aweme_id', default=''
     )).strip()
+    generated_source_id = False
     published_at = _timestamp(_first(
         record, 'published_at', 'created_at', 'publish_time', 'time', 'create_time'
     ))
     if not source_id and text:
         identity = f'{platform}|{published_at}|{text}'.encode('utf-8')
         source_id = hashlib.sha256(identity).hexdigest()[:24]
+        generated_source_id = True
     if not source_id or not text:
         raise CollectorError('invalid_record', '采集记录缺少可识别的 ID 或正文')
-    sentiment, method = infer_sentiment(text, record.get('sentiment'))
-    return {
+    sentiment_detail = score_sentiment(text, record.get('sentiment'))
+    raw, algorithm = _algorithm_bucket(record)
+    algorithm['sentiment'] = sentiment_detail
+    post = {
         'platform': platform,
         'source_id': source_id,
         'author': str(_first(
@@ -130,10 +284,14 @@ def normalize_post(record, platform='weibo', topic=None):
         'fetched_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         'source_url': _first(record, 'source_url', 'url', 'note_url', 'detail_url'),
         'topic': topic or _first(record, 'topic', 'keyword', default='未分类'),
-        'sentiment': sentiment,
-        'sentiment_method': method,
-        'raw': record,
+        'sentiment': sentiment_detail['label'],
+        'sentiment_method': sentiment_detail['method'],
+        'raw': raw,
     }
+    algorithm['quality_flags'] = assess_record_quality(
+        post, record, generated_source_id=generated_source_id
+    )
+    return post
 
 
 def normalize_comment(record, platform='weibo'):
@@ -146,7 +304,9 @@ def normalize_comment(record, platform='weibo'):
     )).strip()
     if not source_id or not post_source_id or not text:
         raise CollectorError('invalid_comment', '评论记录缺少评论 ID、帖子 ID 或正文')
-    sentiment, _ = infer_sentiment(text, record.get('sentiment'))
+    sentiment_detail = score_sentiment(text, record.get('sentiment'))
+    raw, algorithm = _algorithm_bucket(record)
+    algorithm['sentiment'] = sentiment_detail
     return {
         'platform': platform,
         'source_id': source_id,
@@ -157,8 +317,8 @@ def normalize_comment(record, platform='weibo'):
             record, 'published_at', 'created_at', 'publish_time', 'create_time'
         )),
         'fetched_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        'sentiment': sentiment,
-        'raw': record,
+        'sentiment': sentiment_detail['label'],
+        'raw': raw,
     }
 
 
@@ -213,7 +373,17 @@ class FileImportAdapter(CollectorAdapter):
                 progress(min(90, int((index + 1) / len(records) * 90)))
         if not posts:
             raise CollectorError('no_valid_records', '文件中没有可导入的有效帖子')
-        return {'posts': posts, 'comments': [], 'rejected': rejected, 'source_files': [str(path)]}
+        source_files = [str(path)]
+        return {
+            'posts': posts,
+            'comments': [],
+            'rejected': rejected,
+            'source_files': source_files,
+            'quality_summary': summarize_quality(
+                posts, rejected=rejected, source_files=source_files,
+                extra={'adapter': 'file', 'loaded_records': len(records)}
+            ),
+        }
 
 
 class MediaCrawlerWeiboAdapter(CollectorAdapter):
@@ -362,11 +532,23 @@ class MediaCrawlerWeiboAdapter(CollectorAdapter):
                     rejected += 1
         if not posts:
             raise CollectorError('no_valid_records', '采集输出中没有可识别的微博帖子')
+        source_files = [str(path) for path in candidates]
         return {
             'posts': posts,
             'comments': comments,
             'rejected': rejected,
-            'source_files': [str(path) for path in candidates],
+            'source_files': source_files,
+            'quality_summary': summarize_quality(
+                posts,
+                rejected=rejected,
+                source_files=source_files,
+                comments=comments,
+                extra={
+                    'adapter': 'mediacrawler',
+                    'export_files': len(source_files),
+                    'loaded_records': len(posts) + len(comments) + rejected,
+                },
+            ),
         }
 
 

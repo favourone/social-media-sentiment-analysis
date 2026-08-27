@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
+from services.intelligence import algorithm_versions
+
 
 SOURCE_LABELS = {
     'weibo': '微博公开内容',
@@ -187,6 +189,12 @@ def _event_views(events, signals, timeline):
             'engagement': sum(_engagement(item) for item in members),
             'heat_score': float(metrics.get('heat_score', 0) or 0),
             'trend': metrics.get('trend', 'stable'),
+            'cohesion_score': metrics.get('cohesion_score'),
+            'representative_id': metrics.get('representative_id'),
+            'anchor_terms': metrics.get('anchor_terms') or metrics.get('top_terms', [])[:6],
+            'sentiment_method_counts': metrics.get('sentiment_method_counts', {}),
+            'quality_warning_counts': metrics.get('quality_warning_counts', {}),
+            'algorithm_version': metrics.get('algorithm_version'),
             'series': counts,
         })
     return sorted(
@@ -249,6 +257,36 @@ def _demo_mode(signals):
     return 'observed'
 
 
+def _algorithm_meta(signal):
+    return (signal.get('raw') or {}).get('_algorithm') or {}
+
+
+def _quality_flags(signal):
+    return [str(item) for item in (_algorithm_meta(signal).get('quality_flags') or [])]
+
+
+def _sentiment_meta(signal):
+    return _algorithm_meta(signal).get('sentiment') or {}
+
+
+def _sentiment_score_distribution(signals):
+    scores = []
+    confidence = Counter()
+    for signal in signals:
+        sentiment = _sentiment_meta(signal)
+        if isinstance(sentiment.get('score'), (int, float)):
+            scores.append(sentiment['score'])
+        confidence.update([sentiment.get('confidence') or '未记录'])
+    result = {'confidence': dict(confidence.most_common())}
+    if scores:
+        result.update({
+            'min': min(scores),
+            'max': max(scores),
+            'average': round(sum(scores) / len(scores), 1),
+        })
+    return result
+
+
 def build_visual_story(monitor, signals, events, alerts, *, total_available=None):
     """Build an auditable, chart-ready story for one monitor."""
     timeline, start, end, bin_hours = _timeline(signals)
@@ -259,8 +297,14 @@ def build_visual_story(monitor, signals, events, alerts, *, total_available=None
     unknown = len(signals) - negative - nonnegative
     risk = sum(bool(item.get('risk_terms')) for item in signals)
     method_counts = Counter(
-        str(item.get('sentiment_method') or '未记录') for item in signals
+        str(
+            _sentiment_meta(item).get('method')
+            or item.get('sentiment_method')
+            or '未记录'
+        ) for item in signals
     )
+    quality_counts = Counter(flag for item in signals for flag in _quality_flags(item))
+    score_distribution = _sentiment_score_distribution(signals)
     peak = max(timeline, key=lambda item: item['total'], default=None)
     open_alerts = [
         item for item in alerts
@@ -318,6 +362,13 @@ def build_visual_story(monitor, signals, events, alerts, *, total_available=None
                 {'method': method, 'count': count}
                 for method, count in method_counts.most_common()
             ],
+            'sentiment_method_counts': dict(method_counts.most_common()),
+            'sentiment_score_distribution': score_distribution,
+            'quality_warnings': [
+                {'flag': flag, 'count': count}
+                for flag, count in quality_counts.most_common()
+            ],
+            'algorithm_versions': algorithm_versions(),
             'note': mode_note,
         },
         'summary': {
@@ -345,6 +396,9 @@ def build_visual_story(monitor, signals, events, alerts, *, total_available=None
             'negative': '由每条记录的 sentiment 字段统计；具体方法见溯源信息。',
             'risk': '至少命中一个监测项目风险词的信号。',
             'heat': '由样本量、互动量、负面比例、来源数和增长趋势组成的 0–100 描述性评分，不是概率。',
+            'sentiment_score': '透明词典或来源标签生成的 -100 至 100 筛查分，不替代人工情感标注。',
+            'clustering': '事件使用字符 n-gram TF-IDF 相似度聚合；凝聚度表示样本间文本相似近似水平。',
+            'quality': '质量提示来自字段缺失、短文本、自动生成 ID 等可审计规则，只提示核验优先级。',
             'network': '来源—事件证据归属网络，不代表社交平台转发链或因果关系。',
         },
     }

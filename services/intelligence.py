@@ -8,14 +8,21 @@ import logging
 import math
 import re
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
 import jieba.analyse
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from crawler.adapters import CollectorError, CollectorPaused, get_collector
+from crawler.adapters import (
+    CollectorError,
+    CollectorPaused,
+    QUALITY_ALGORITHM_VERSION,
+    SENTIMENT_ALGORITHM_VERSION,
+    get_collector,
+    summarize_quality,
+)
 from services.delivery import deliver_webhook
 from storage.monitor_store import get_monitor_store
 from storage.product_store import get_product_store, utc_now
@@ -24,6 +31,19 @@ from storage.product_store import get_product_store, utc_now
 LOGGER = logging.getLogger(__name__)
 MAX_CLUSTER_SIGNALS = 500
 CLUSTER_THRESHOLD = 0.38
+MATCHING_ALGORITHM_VERSION = 'keyword_rule_v2'
+CLUSTERING_ALGORITHM_VERSION = 'char_ngram_tfidf_v2'
+ALERT_ALGORITHM_VERSION = 'explainable_alert_rules_v2'
+
+
+def algorithm_versions():
+    return {
+        'sentiment': SENTIMENT_ALGORITHM_VERSION,
+        'quality': QUALITY_ALGORITHM_VERSION,
+        'matching': MATCHING_ALGORITHM_VERSION,
+        'clustering': CLUSTERING_ALGORITHM_VERSION,
+        'alerting': ALERT_ALGORITHM_VERSION,
+    }
 
 
 def _timestamp(value):
@@ -47,6 +67,96 @@ def _normalized_terms(values):
     return result
 
 
+def _algorithm_meta(item):
+    return (item.get('raw') or {}).get('_algorithm') or {}
+
+
+def _quality_flags(item):
+    flags = _algorithm_meta(item).get('quality_flags') or []
+    return [str(flag) for flag in flags if flag]
+
+
+def _sentiment_meta(item):
+    return _algorithm_meta(item).get('sentiment') or {}
+
+
+def _representative_signal(signals):
+    return max(
+        signals,
+        key=lambda item: (
+            sum(int(value or 0) for value in item.get('engagement', {}).values()),
+            float(item.get('relevance_score') or 0),
+            len(item.get('text', '')),
+            -int(item.get('id') or 0),
+        ),
+    )
+
+
+def _signal_sort_key(item):
+    return (
+        item.get('published_at') or item.get('fetched_at') or '',
+        item.get('platform') or '',
+        item.get('source_id') or '',
+        int(item.get('id') or 0),
+    )
+
+
+def _hours_between(start, end):
+    if not start or not end:
+        return None
+    seconds = max((end - start).total_seconds(), 0)
+    return round(seconds / 3600, 1)
+
+
+def _source_mix_score(platforms, sample_count):
+    if sample_count <= 1:
+        return 0
+    return round(min(len(platforms) / max(sample_count, 1), 1) * 100, 1)
+
+
+def _count_sentiment_methods(signals):
+    counter = Counter()
+    for item in signals or []:
+        sentiment = _sentiment_meta(item)
+        counter.update([sentiment.get('method') or item.get('sentiment_method') or '未记录'])
+    return dict(counter.most_common())
+
+
+def _count_quality_warnings(signals):
+    counter = Counter()
+    for item in signals or []:
+        counter.update(_quality_flags(item))
+    return dict(counter.most_common())
+
+
+def _quality_summary_from_signals(signals):
+    flag_counts = Counter()
+    method_counts = Counter()
+    confidence_counts = Counter()
+    scores = []
+    for item in signals or []:
+        flag_counts.update(_quality_flags(item))
+        sentiment = _sentiment_meta(item)
+        method_counts.update([sentiment.get('method') or item.get('sentiment_method') or '未记录'])
+        confidence_counts.update([sentiment.get('confidence') or '未记录'])
+        if isinstance(sentiment.get('score'), (int, float)):
+            scores.append(sentiment['score'])
+    summary = {
+        'algorithm_version': QUALITY_ALGORITHM_VERSION,
+        'valid_posts': len(signals or []),
+        'quality_flags': dict(flag_counts.most_common()),
+        'sentiment_methods': dict(method_counts.most_common()),
+        'sentiment_confidence': dict(confidence_counts.most_common()),
+    }
+    if scores:
+        summary['sentiment_score'] = {
+            'min': min(scores),
+            'max': max(scores),
+            'average': round(sum(scores) / len(scores), 1),
+        }
+    return summary
+
+
 def evaluate_post(post, monitor):
     """Return an auditable rule match or ``None`` for one collected post."""
     text = f"{post.get('text', '')} {post.get('topic', '')}".lower()
@@ -68,12 +178,36 @@ def evaluate_post(post, monitor):
     keyword_score = len(keyword_hits) / max(len(keywords), 1) if keywords else 1
     required_score = 1 if required else 0
     risk_bonus = min(len(risk_hits) * 0.08, 0.24)
-    relevance = min(1, 0.72 * keyword_score + 0.2 * required_score + risk_bonus)
+    quality_flags = _quality_flags(post)
+    quality_penalty = 0
+    if 'short_text' in quality_flags:
+        quality_penalty += 0.08
+    if 'missing_published_at' in quality_flags:
+        quality_penalty += 0.04
+    if 'missing_source_url' in quality_flags:
+        quality_penalty += 0.03
+    relevance = max(
+        0,
+        min(1, 0.72 * keyword_score + 0.2 * required_score + risk_bonus - quality_penalty),
+    )
     return {
         'post_id': post['id'],
         'relevance_score': round(relevance * 100, 1),
         'matched_terms': matched,
         'risk_terms': risk_hits,
+        'match_evidence': {
+            'algorithm_version': MATCHING_ALGORITHM_VERSION,
+            'keyword_hits': keyword_hits,
+            'required_hits': required,
+            'risk_hits': risk_hits,
+            'quality_flags': quality_flags,
+            'quality_penalty': round(quality_penalty * 100, 1),
+            'score_components': {
+                'keyword_score': round(keyword_score, 3),
+                'required_score': required_score,
+                'risk_bonus': round(risk_bonus, 3),
+            },
+        },
     }
 
 
@@ -106,13 +240,20 @@ def _event_title(signals, top_terms):
     return text[:48] or '未命名事件'
 
 
-def _event_metrics(signals, top_terms):
+def _event_metrics(
+    signals,
+    top_terms,
+    threshold=CLUSTER_THRESHOLD,
+    cohesion_score=None,
+    fingerprint_basis=None,
+):
     timestamps = [
         _timestamp(item.get('published_at') or item.get('fetched_at'))
         for item in signals
     ]
     timestamps = [item for item in timestamps if item]
     reference = max(timestamps) if timestamps else datetime.now(timezone.utc)
+    first_seen = min(timestamps) if timestamps else None
     recent_start = reference - timedelta(hours=24)
     previous_start = reference - timedelta(hours=48)
     recent = sum(1 for item in timestamps if item >= recent_start)
@@ -136,6 +277,9 @@ def _event_metrics(signals, top_terms):
     risk_terms = sorted({
         term for item in signals for term in item.get('risk_terms', [])
     })
+    representative = _representative_signal(signals)
+    sentiment_method_counts = _count_sentiment_methods(signals)
+    quality_warning_counts = _count_quality_warnings(signals)
     heat = min(
         100,
         round(
@@ -146,12 +290,21 @@ def _event_metrics(signals, top_terms):
             1,
         ),
     )
+    confidence = 'limited' if len(signals) < 5 else 'moderate'
+    if quality_warning_counts and len(signals) < 10:
+        confidence = 'limited'
     return {
+        'algorithm_version': CLUSTERING_ALGORITHM_VERSION,
+        'cluster_threshold': threshold,
+        'cohesion_score': cohesion_score,
+        'representative_id': representative.get('id'),
+        'anchor_terms': top_terms[:6],
         'sample_count': len(signals),
         'negative_count': negative,
         'negative_ratio': round(negative / max(len(signals), 1) * 100, 1),
         'source_count': len(platforms),
         'platforms': platforms,
+        'source_mix_score': _source_mix_score(platforms, len(signals)),
         'total_engagement': engagement,
         'recent_24h': recent,
         'previous_24h': previous,
@@ -160,15 +313,19 @@ def _event_metrics(signals, top_terms):
         'heat_score': heat,
         'top_terms': top_terms,
         'risk_terms': risk_terms,
+        'sentiment_method_counts': sentiment_method_counts,
+        'quality_warning_counts': quality_warning_counts,
+        'time_span_hours': _hours_between(first_seen, reference),
+        'fingerprint_basis': fingerprint_basis,
         'evidence_ids': [item['id'] for item in signals[:5]],
-        'confidence': 'limited' if len(signals) < 5 else 'moderate',
+        'confidence': confidence,
         'reference_time': reference.replace(microsecond=0).isoformat(),
     }
 
 
 def cluster_signals(monitor_id, signals, threshold=CLUSTER_THRESHOLD):
     """Group related signals with deterministic character n-gram similarity."""
-    signals = list(signals[:MAX_CLUSTER_SIGNALS])
+    signals = sorted(list(signals), key=_signal_sort_key)[:MAX_CLUSTER_SIGNALS]
     if not signals:
         return []
     texts = [
@@ -176,6 +333,7 @@ def cluster_signals(monitor_id, signals, threshold=CLUSTER_THRESHOLD):
         for item in signals
     ]
     parents = list(range(len(signals)))
+    similarities = None
 
     def find(index):
         while parents[index] != index:
@@ -203,17 +361,35 @@ def cluster_signals(monitor_id, signals, threshold=CLUSTER_THRESHOLD):
 
     groups = defaultdict(list)
     for index, signal in enumerate(signals):
-        groups[find(index)].append(signal)
+        groups[find(index)].append((index, signal))
+
+    def group_cohesion(indexes):
+        if len(indexes) <= 1:
+            return 100.0
+        if similarities is None:
+            return None
+        values = []
+        for left_pos, left in enumerate(indexes):
+            for right in indexes[left_pos + 1:]:
+                values.append(float(similarities[left, right]))
+        if not values:
+            return None
+        return round(sum(values) / len(values) * 100, 1)
 
     events = []
-    for grouped in groups.values():
+    for grouped_pairs in groups.values():
+        grouped_pairs = sorted(grouped_pairs, key=lambda pair: _signal_sort_key(pair[1]))
+        indexes = [index for index, _signal in grouped_pairs]
+        grouped = [_signal for _index, _signal in grouped_pairs]
         combined = '\n'.join(item.get('text', '') for item in grouped)
         top_terms = _extract_terms(combined)
         stable_material = '|'.join(top_terms[:5])
+        fingerprint_basis = 'top_terms'
         if not stable_material:
             stable_material = '|'.join(
                 sorted(f"{item.get('platform')}:{item.get('source_id')}" for item in grouped)
             )
+            fingerprint_basis = 'platform_source_id'
         fingerprint = hashlib.sha256(stable_material.encode('utf-8')).hexdigest()[:20]
         event_id = str(uuid.uuid5(
             uuid.NAMESPACE_URL, f'event:{monitor_id}:{fingerprint}'
@@ -223,11 +399,21 @@ def cluster_signals(monitor_id, signals, threshold=CLUSTER_THRESHOLD):
             for item in grouped
             if item.get('published_at') or item.get('fetched_at')
         ]
-        metrics = _event_metrics(grouped, top_terms)
+        metrics = _event_metrics(
+            grouped,
+            top_terms,
+            threshold=threshold,
+            cohesion_score=group_cohesion(indexes),
+            fingerprint_basis=fingerprint_basis,
+        )
         title = _event_title(grouped, top_terms)
+        quality_note = ''
+        if metrics['quality_warning_counts']:
+            quality_note = '；存在数据质量提示，需结合原文复核'
         summary = (
             f"聚合 {len(grouped)} 条相关信号，来自 {metrics['source_count']} 个来源；"
-            f"负面筛查占比 {metrics['negative_ratio']}%，热度评分 {metrics['heat_score']}。"
+            f"负面筛查占比 {metrics['negative_ratio']}%，热度评分 {metrics['heat_score']}；"
+            f"聚类凝聚度 {metrics['cohesion_score']}%{quality_note}。"
         )
         events.append({
             'id': event_id,
@@ -269,6 +455,11 @@ def build_alert_specs(monitor, events, signals):
             'sample_count': metrics['sample_count'],
             'reference_time': metrics['reference_time'],
             'confidence': metrics['confidence'],
+            'algorithm_version': ALERT_ALGORITHM_VERSION,
+            'clustering_algorithm_version': metrics.get('algorithm_version'),
+            'sentiment_method_counts': metrics.get('sentiment_method_counts', {}),
+            'quality_warning_counts': metrics.get('quality_warning_counts', {}),
+            'sample_limit_note': '预警证据最多展示前 5 条信号，完整样本请查看事件详情。',
         }
         base = f"{monitor['id']}:{event['fingerprint']}"
 
@@ -280,7 +471,17 @@ def build_alert_specs(monitor, events, signals):
                 'severity': 'high' if len(metrics['risk_terms']) >= 2 else 'medium',
                 'title': f"风险词命中 · {event['title']}",
                 'message': f'当前事件命中风险词：{terms}。请回到原文核实语境。',
-                'evidence': {**evidence, 'risk_terms': metrics['risk_terms']},
+                'evidence': {
+                    **evidence,
+                    'trigger_rule': 'risk_keyword',
+                    'risk_terms': metrics['risk_terms'],
+                    'thresholds': {'min_risk_terms': 1},
+                    'observed_values': {
+                        'risk_term_count': len(metrics['risk_terms']),
+                        'risk_terms': metrics['risk_terms'],
+                        'sample_count': metrics['sample_count'],
+                    },
+                },
                 'dedupe_key': f'{base}:risk_keyword',
             })
 
@@ -298,7 +499,20 @@ def build_alert_specs(monitor, events, signals):
                     f"{metrics['negative_ratio']}%，达到项目阈值 "
                     f"{monitor['negative_threshold']}%。"
                 ),
-                'evidence': {**evidence, 'negative_ratio': metrics['negative_ratio']},
+                'evidence': {
+                    **evidence,
+                    'trigger_rule': 'negative_ratio',
+                    'negative_ratio': metrics['negative_ratio'],
+                    'thresholds': {
+                        'min_samples': 3,
+                        'negative_ratio_percent': monitor['negative_threshold'],
+                    },
+                    'observed_values': {
+                        'sample_count': metrics['sample_count'],
+                        'negative_count': metrics['negative_count'],
+                        'negative_ratio_percent': metrics['negative_ratio'],
+                    },
+                },
                 'dedupe_key': f'{base}:negative_ratio',
             })
 
@@ -325,9 +539,19 @@ def build_alert_specs(monitor, events, signals):
                 ),
                 'evidence': {
                     **evidence,
+                    'trigger_rule': 'volume_spike',
                     'recent_24h': metrics['recent_24h'],
                     'previous_24h': metrics['previous_24h'],
                     'growth_ratio': metrics['growth_ratio'],
+                    'thresholds': {
+                        'recent_24h_min': monitor['spike_threshold'],
+                        'growth_ratio_min': 2,
+                    },
+                    'observed_values': {
+                        'recent_24h': metrics['recent_24h'],
+                        'previous_24h': metrics['previous_24h'],
+                        'growth_ratio': metrics['growth_ratio'],
+                    },
                 },
                 'dedupe_key': f'{base}:volume_spike',
             })
@@ -347,12 +571,19 @@ def _collect_feed_source(product_store, monitor, source):
     try:
         result = get_collector('rss').collect(job)
         inserted = product_store.insert_posts(job['id'], result['posts'])
+        duplicate_posts = len(result['posts']) - inserted
+        quality_summary = dict(result.get('quality_summary') or {})
+        if quality_summary:
+            quality_summary['duplicate_records'] = (
+                int(quality_summary.get('duplicate_records') or 0) + duplicate_posts
+            )
         stats = {
             'received_posts': len(result['posts']),
             'inserted_posts': inserted,
-            'duplicate_posts': len(result['posts']) - inserted,
+            'duplicate_posts': duplicate_posts,
             'rejected_records': result.get('rejected', 0),
             'source_file_count': len(result.get('source_files', [])),
+            'quality_summary': quality_summary,
         }
         product_store.update_collection_job(
             job['id'],
@@ -478,12 +709,15 @@ def run_monitor(run_id):
         stats = {
             'sources_total': len(enabled_sources),
             'sources_succeeded': len(source_stats),
+            'source_stats': source_stats,
             'source_errors': source_errors,
             'matched_signals': len(matches),
             'events': len(events),
             'active_alerts': len(specs),
             'new_alerts': len(created_alerts),
             'auto_resolved_alerts': auto_resolved,
+            'quality_summary': _quality_summary_from_signals(signals),
+            'algorithm_versions': algorithm_versions(),
         }
         status = 'succeeded'
         error_code = None

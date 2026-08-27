@@ -10,7 +10,12 @@ import requests
 from bs4 import BeautifulSoup
 
 import config
-from crawler.adapters import CollectorAdapter, CollectorError, normalize_post
+from crawler.adapters import (
+    CollectorAdapter,
+    CollectorError,
+    normalize_post,
+    summarize_quality,
+)
 from services.network_safety import UnsafeURL, validate_outbound_url
 
 
@@ -94,6 +99,7 @@ class RSSFeedAdapter(CollectorAdapter):
         posts = []
         rejected = 0
         source_files = []
+        parsed_records = 0
         for index, raw_url in enumerate(urls[:20]):
             try:
                 url = validate_outbound_url(
@@ -115,7 +121,9 @@ class RSSFeedAdapter(CollectorAdapter):
                     raise CollectorError(
                         'feed_too_large', 'RSS/Atom 响应超过允许大小'
                     )
-                for record in parse_feed(payload, final_url):
+                records = parse_feed(payload, final_url)
+                parsed_records += len(records)
+                for record in records:
                     try:
                         posts.append(normalize_post(record, 'rss', topic))
                     except CollectorError:
@@ -136,4 +144,14 @@ class RSSFeedAdapter(CollectorAdapter):
             'comments': [],
             'rejected': rejected,
             'source_files': source_files,
+            'quality_summary': summarize_quality(
+                posts,
+                rejected=rejected,
+                source_files=source_files,
+                extra={
+                    'adapter': 'rss',
+                    'feed_count': min(len(urls), 20),
+                    'parsed_records': parsed_records,
+                },
+            ),
         }

@@ -26,7 +26,17 @@ class VisualStoryAggregateTest(unittest.TestCase):
                 'sentiment_method': 'scenario_label_for_demo',
                 'risk_terms': ['投诉'],
                 'engagement': {'likes': 10, 'comments': 2, 'reposts': 1},
-                'raw': {'data_kind': 'synthetic_competition_demo'},
+                'raw': {
+                    'data_kind': 'synthetic_competition_demo',
+                    '_algorithm': {
+                        'sentiment': {
+                            'method': 'scenario_label_for_demo',
+                            'score': -70,
+                            'confidence': 'high',
+                        },
+                        'quality_flags': ['lexicon_sentiment_used'],
+                    },
+                },
             },
             {
                 'id': 2,
@@ -37,7 +47,17 @@ class VisualStoryAggregateTest(unittest.TestCase):
                 'sentiment_method': 'scenario_label_for_demo',
                 'risk_terms': [],
                 'engagement': {},
-                'raw': {'data_kind': 'synthetic_competition_demo'},
+                'raw': {
+                    'data_kind': 'synthetic_competition_demo',
+                    '_algorithm': {
+                        'sentiment': {
+                            'method': 'scenario_label_for_demo',
+                            'score': 70,
+                            'confidence': 'high',
+                        },
+                        'quality_flags': [],
+                    },
+                },
             },
             {
                 'id': 3,
@@ -49,7 +69,16 @@ class VisualStoryAggregateTest(unittest.TestCase):
                 'sentiment_method': None,
                 'risk_terms': [],
                 'engagement': {},
-                'raw': {'data_kind': 'synthetic_competition_demo'},
+                'raw': {
+                    'data_kind': 'synthetic_competition_demo',
+                    '_algorithm': {
+                        'sentiment': {
+                            'method': '未记录',
+                            'confidence': '未记录',
+                        },
+                        'quality_flags': ['missing_published_at'],
+                    },
+                },
             },
         ]
         events = [{
@@ -58,7 +87,16 @@ class VisualStoryAggregateTest(unittest.TestCase):
             'status': 'open',
             'first_seen': signals[0]['published_at'],
             'last_seen': signals[1]['published_at'],
-            'metrics': {'heat_score': 62, 'trend': 'rising'},
+            'metrics': {
+                'heat_score': 62,
+                'trend': 'rising',
+                'cohesion_score': 88.5,
+                'representative_id': 1,
+                'anchor_terms': ['食品安全'],
+                'sentiment_method_counts': {'scenario_label_for_demo': 2},
+                'quality_warning_counts': {'lexicon_sentiment_used': 1},
+                'algorithm_version': 'char_ngram_tfidf_v2',
+            },
         }]
         alerts = [{
             'status': 'new', 'severity': 'high', 'event_id': 'e-1'
@@ -73,6 +111,17 @@ class VisualStoryAggregateTest(unittest.TestCase):
         self.assertEqual(sum(item['count'] for item in story['sources']), 3)
         self.assertEqual(story['sentiment']['unknown'], 1)
         self.assertEqual(story['summary']['high_alerts'], 1)
+        self.assertIn('algorithm_versions', story['provenance'])
+        self.assertEqual(
+            story['provenance']['algorithm_versions']['clustering'],
+            'char_ngram_tfidf_v2',
+        )
+        self.assertTrue(story['provenance']['quality_warnings'])
+        self.assertIn('sentiment_score_distribution', story['provenance'])
+        self.assertEqual(story['events'][0]['cohesion_score'], 88.5)
+        self.assertEqual(story['events'][0]['representative_id'], 1)
+        self.assertEqual(story['events'][0]['anchor_terms'], ['食品安全'])
+        self.assertIn('lexicon_sentiment_used', story['events'][0]['quality_warning_counts'])
         self.assertIn('不代表转发或因果', story['graph']['meaning'])
         self.assertTrue(story['graph']['edges'])
 

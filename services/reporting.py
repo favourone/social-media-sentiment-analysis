@@ -16,14 +16,47 @@ def _summary(posts):
     negative = sum(1 for post in posts if post.get('sentiment') == 0)
     topics = Counter(post.get('topic') or '未分类' for post in posts)
     sources = Counter(post.get('platform') or 'unknown' for post in posts)
-    return {
+    methods = Counter()
+    quality_flags = Counter()
+    confidence = Counter()
+    scores = []
+    for post in posts:
+        algorithm = (post.get('raw') or {}).get('_algorithm') or {}
+        sentiment = algorithm.get('sentiment') or {}
+        methods.update([sentiment.get('method') or post.get('sentiment_method') or '未记录'])
+        confidence.update([sentiment.get('confidence') or '未记录'])
+        quality_flags.update(algorithm.get('quality_flags') or [])
+        if isinstance(sentiment.get('score'), (int, float)):
+            scores.append(sentiment['score'])
+    result = {
         'sample_count': total,
         'positive_count': total - negative,
         'negative_count': negative,
         'negative_ratio': round(negative / max(total, 1) * 100, 1),
         'topics': dict(topics.most_common(10)),
         'sources': dict(sources),
+        'sentiment_methods': dict(methods.most_common()),
+        'sentiment_confidence': dict(confidence.most_common()),
+        'quality_flags': dict(quality_flags.most_common()),
     }
+    if scores:
+        result['sentiment_score'] = {
+            'min': min(scores),
+            'max': max(scores),
+            'average': round(sum(scores) / len(scores), 1),
+        }
+    return result
+
+
+def _algorithm_post(post):
+    return (post.get('raw') or {}).get('_algorithm') or {}
+
+
+def _csv_safe(value):
+    text = str(value if value is not None else '')
+    if text[:1] in {'=', '+', '-', '@', '\t', '\r'}:
+        return f"'{text}"
+    return text
 
 
 def generate_csv(path, posts):
@@ -32,18 +65,22 @@ def generate_csv(path, posts):
         writer = csv.writer(handle)
         writer.writerow([
             'platform', 'source_id', 'topic', 'author', 'published_at',
-            'sentiment', 'sentiment_method', 'likes', 'comments', 'reposts',
-            'source_url', 'text'
+            'sentiment', 'sentiment_method', 'sentiment_score', 'sentiment_confidence',
+            'quality_flags', 'likes', 'comments', 'reposts', 'source_url', 'text'
         ])
         for post in posts:
             engagement = post.get('engagement', {})
-            writer.writerow([
+            algorithm = _algorithm_post(post)
+            sentiment = algorithm.get('sentiment') or {}
+            row = [
                 post.get('platform'), post.get('source_id'), post.get('topic'),
                 post.get('author'), post.get('published_at'), post.get('sentiment'),
-                post.get('sentiment_method'), engagement.get('likes', 0),
-                engagement.get('comments', 0), engagement.get('reposts', 0),
-                post.get('source_url'), post.get('text'),
-            ])
+                post.get('sentiment_method'), sentiment.get('score'),
+                sentiment.get('confidence'), '、'.join(algorithm.get('quality_flags') or []),
+                engagement.get('likes', 0), engagement.get('comments', 0),
+                engagement.get('reposts', 0), post.get('source_url'), post.get('text'),
+            ]
+            writer.writerow([_csv_safe(value) for value in row])
 
 
 def generate_pdf(path, posts, filters):
@@ -110,7 +147,30 @@ def generate_pdf(path, posts, filters):
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('PADDING', (0, 0), (-1, -1), 6),
     ]))
-    story.extend([table, Spacer(1, 5 * mm), Paragraph('话题分布', heading)])
+    story.extend([table, Spacer(1, 5 * mm), Paragraph('算法与数据质量摘要', heading)])
+    method_text = '；'.join(
+        f'{method}：{count} 条' for method, count in summary['sentiment_methods'].items()
+    ) or '未记录'
+    confidence_text = '；'.join(
+        f'{name}：{count} 条' for name, count in summary['sentiment_confidence'].items()
+    ) or '未记录'
+    quality_text = '；'.join(
+        f'{name}：{count} 条' for name, count in summary['quality_flags'].items()
+    ) or '未发现明显字段质量提示'
+    score = summary.get('sentiment_score') or {}
+    story.extend([
+        Paragraph(f'情感方法分布：{method_text}', base),
+        Paragraph(f'情感置信度分布：{confidence_text}', base),
+        Paragraph(
+            '情感分数范围：'
+            f"{score.get('min', '—')} 至 {score.get('max', '—')}，"
+            f"平均 {score.get('average', '—')}",
+            base,
+        ),
+        Paragraph(f'数据质量提示：{quality_text}', base),
+        Spacer(1, 5 * mm),
+        Paragraph('话题分布', heading),
+    ])
     for topic, count in summary['topics'].items():
         story.append(Paragraph(f'{topic}：{count} 条', base))
     story.extend([
@@ -127,7 +187,8 @@ def generate_pdf(path, posts, filters):
         Paragraph('解释边界', heading),
         Paragraph(
             '本报告只描述所选样本。采集结果会受到平台权限、时间窗口、关键词和采样机制影响；'
-            '模型结果不构成因果判断，也不能代表整个平台用户。', base
+            '情感评分、事件聚合、风险预警和数据质量提示均为筛查证据，不构成因果判断，'
+            '也不能代表整个平台用户。', base
         ),
     ])
     document.build(story)

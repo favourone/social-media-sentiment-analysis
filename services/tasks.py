@@ -64,15 +64,23 @@ def run_collection_job(job_id):
         comments = result.get('comments', [])
         inserted_posts = store.insert_posts(job_id, posts)
         inserted_comments = store.insert_comments(job_id, comments)
+        duplicate_posts = len(posts) - inserted_posts
+        duplicate_comments = len(comments) - inserted_comments
+        quality_summary = dict(result.get('quality_summary') or {})
+        if quality_summary:
+            quality_summary['duplicate_records'] = (
+                int(quality_summary.get('duplicate_records') or 0) + duplicate_posts
+            )
         stats = {
             'received_posts': len(posts),
             'inserted_posts': inserted_posts,
-            'duplicate_posts': len(posts) - inserted_posts,
+            'duplicate_posts': duplicate_posts,
             'received_comments': len(comments),
             'inserted_comments': inserted_comments,
-            'duplicate_comments': len(comments) - inserted_comments,
+            'duplicate_comments': duplicate_comments,
             'rejected_records': result.get('rejected', 0),
             'source_file_count': len(result.get('source_files', [])),
+            'quality_summary': quality_summary,
         }
         _refresh_alerts(store, store.list_posts(limit=100000))
         store.update_collection_job(
