@@ -13,7 +13,13 @@ from unittest.mock import Mock, patch
 
 import config
 import requests
-from crawler.adapters import CollectorError
+from crawler.adapters import (
+    CollectorError,
+    infer_sentiment,
+    normalize_post,
+    score_sentiment,
+    summarize_quality,
+)
 from crawler.rss_adapter import RSSFeedAdapter, parse_feed
 from services.briefing import _extract_json, _llm_brief
 from services.delivery import deliver_webhook
@@ -79,6 +85,38 @@ class RSSAndNetworkSafetyTest(unittest.TestCase):
 
 
 class MonitoringLogicTest(unittest.TestCase):
+    def test_sentiment_scoring_and_quality_summary_are_explainable(self):
+        source_label = score_sentiment('食堂服务正常', raw_value=0)
+        self.assertEqual(source_label['label'], 0)
+        self.assertEqual(source_label['method'], 'source_label')
+        negative = score_sentiment('宿舍连续停电且大量同学投诉安全隐患')
+        self.assertEqual(negative['label'], 0)
+        self.assertLess(negative['score'], 0)
+        self.assertIn('投诉', negative['evidence']['negative_terms'])
+        positive = score_sentiment('学校及时解决网络故障，大家点赞感谢')
+        self.assertEqual(positive['label'], 1)
+        self.assertGreater(positive['score'], 0)
+        low = score_sentiment('今天开会')
+        self.assertEqual(low['confidence'], 'low')
+        self.assertEqual(infer_sentiment('诈骗风险')[0], 0)
+
+        post = normalize_post({
+            'text': '食堂投诉',
+            'id': '',
+            'author': '',
+            'url': '',
+        }, platform='rss', topic='食品安全')
+        flags = post['raw']['_algorithm']['quality_flags']
+        self.assertIn('missing_published_at', flags)
+        self.assertIn('missing_author', flags)
+        self.assertIn('missing_source_url', flags)
+        self.assertIn('short_text', flags)
+        self.assertIn('generated_source_id', flags)
+        summary = summarize_quality([post], rejected=2, source_files=['feed'])
+        self.assertEqual(summary['valid_posts'], 1)
+        self.assertEqual(summary['rejected_records'], 2)
+        self.assertIn('lexicon_sentiment_used', summary['quality_flags'])
+
     def test_rule_matching_is_auditable_and_exclusions_win(self):
         monitor = {
             'keywords': ['食堂', '餐饮'],
@@ -94,6 +132,11 @@ class MonitoringLogicTest(unittest.TestCase):
         self.assertEqual(matched['post_id'], 7)
         self.assertEqual(matched['matched_terms'], ['食堂', '校园'])
         self.assertEqual(matched['risk_terms'], ['投诉'])
+        self.assertIn('match_evidence', matched)
+        self.assertEqual(
+            matched['match_evidence']['algorithm_version'],
+            'keyword_rule_v2',
+        )
         self.assertGreater(matched['relevance_score'], 60)
         self.assertIsNone(evaluate_post({
             'id': 8,
@@ -114,6 +157,16 @@ class MonitoringLogicTest(unittest.TestCase):
                 'sentiment': 0,
                 'engagement': {'likes': index},
                 'risk_terms': ['投诉'],
+                'raw': {
+                    '_algorithm': {
+                        'sentiment': {
+                            'method': 'transparent_lexicon_v2',
+                            'score': -80,
+                            'confidence': 'high',
+                        },
+                        'quality_flags': ['lexicon_sentiment_used'],
+                    }
+                },
             })
         events = cluster_signals('monitor-test', signals)
         self.assertEqual(len(events), 1)
@@ -122,6 +175,13 @@ class MonitoringLogicTest(unittest.TestCase):
         self.assertEqual(metrics['negative_ratio'], 100)
         self.assertEqual(metrics['source_count'], 2)
         self.assertEqual(metrics['evidence_ids'], [1, 2, 3, 4])
+        self.assertEqual(metrics['algorithm_version'], 'char_ngram_tfidf_v2')
+        self.assertEqual(metrics['cluster_threshold'], 0.38)
+        self.assertIsNotNone(metrics['cohesion_score'])
+        self.assertIn('representative_id', metrics)
+        self.assertIn('投诉', metrics['anchor_terms'] + metrics['risk_terms'])
+        self.assertEqual(metrics['sentiment_method_counts']['transparent_lexicon_v2'], 4)
+        self.assertEqual(metrics['quality_warning_counts']['lexicon_sentiment_used'], 4)
 
     def test_store_keeps_alert_lifecycle_and_redacts_delivery_destination(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -368,6 +428,12 @@ class V2ApiWorkflowTest(unittest.TestCase):
         self.assertEqual(run['stats']['matched_signals'], 6)
         self.assertGreaterEqual(run['stats']['events'], 1)
         self.assertGreaterEqual(run['stats']['new_alerts'], 1)
+        self.assertIn('quality_summary', run['stats'])
+        self.assertIn('algorithm_versions', run['stats'])
+        self.assertEqual(
+            run['stats']['algorithm_versions']['alerting'],
+            'explainable_alert_rules_v2',
+        )
 
         signals = self.client.get(
             '/api/v2/signals',
@@ -375,6 +441,8 @@ class V2ApiWorkflowTest(unittest.TestCase):
         ).get_json()['data']
         self.assertEqual(len(signals), 6)
         self.assertTrue(all(item['matched_terms'] for item in signals))
+        self.assertTrue(all(item['raw']['_algorithm']['sentiment'] for item in signals))
+        self.assertTrue(all(item['raw']['_algorithm']['quality_flags'] for item in signals))
 
         events = self.client.get(
             '/api/v2/events',
@@ -384,6 +452,10 @@ class V2ApiWorkflowTest(unittest.TestCase):
         event_id = events[0]['id']
         event = self.client.get(f'/api/v2/events/{event_id}').get_json()['data']
         self.assertEqual(event['metrics']['sample_count'], 6)
+        self.assertIn('cohesion_score', event['metrics'])
+        self.assertIn('representative_id', event['metrics'])
+        self.assertIn('sentiment_method_counts', event['metrics'])
+        self.assertIn('quality_warning_counts', event['metrics'])
         self.assertEqual(len(event['signals']), 6)
 
         brief_response = self.client.post(
@@ -402,6 +474,10 @@ class V2ApiWorkflowTest(unittest.TestCase):
             query_string={'monitor_id': monitor['id']},
         ).get_json()['data']
         self.assertTrue(alerts)
+        self.assertIn('trigger_rule', alerts[0]['evidence'])
+        self.assertIn('thresholds', alerts[0]['evidence'])
+        self.assertIn('observed_values', alerts[0]['evidence'])
+        self.assertIn('algorithm_version', alerts[0]['evidence'])
         transition = self.client.post(
             f"/api/v2/alerts/{alerts[0]['id']}/transition",
             json={'status': 'investigating', 'note': '已核验并开始调查'},

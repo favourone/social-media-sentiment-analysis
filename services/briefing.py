@@ -21,6 +21,14 @@ LOGGER = logging.getLogger(__name__)
 def _deterministic_brief(event, signals):
     metrics = event['metrics']
     citations = [item['id'] for item in signals[:5]]
+    quality_warnings = metrics.get('quality_warning_counts') or {}
+    sentiment_methods = metrics.get('sentiment_method_counts') or {}
+    quality_line = '、'.join(
+        f'{name} {count} 条' for name, count in quality_warnings.items()
+    ) or '未发现明显字段质量提示'
+    method_line = '、'.join(
+        f'{name} {count} 条' for name, count in sentiment_methods.items()
+    ) or '未记录'
     key_points = [
         (
             f"共收录 {metrics.get('sample_count', len(signals))} 条相关信号，"
@@ -28,13 +36,19 @@ def _deterministic_brief(event, signals):
         ),
         (
             f"负面筛查占比 {metrics.get('negative_ratio', 0)}%；"
-            "该标签来自来源标签或透明词典，只能用于筛查。"
+            f"情感方法分布：{method_line}。"
+        ),
+        (
+            f"聚类凝聚度 {metrics.get('cohesion_score', '—')}%，"
+            f"代表样本 #{metrics.get('representative_id', '—')}，"
+            f"锚定词：{'、'.join(metrics.get('anchor_terms') or metrics.get('top_terms', [])[:6]) or '未提取'}。"
         ),
         (
             f"最近 24 小时 {metrics.get('recent_24h', 0)} 条，"
             f"前一窗口 {metrics.get('previous_24h', 0)} 条，"
             f"趋势标记为 {metrics.get('trend', 'unknown')}。"
         ),
+        f"数据质量提示：{quality_line}。",
     ]
     return {
         'headline': event['title'],
@@ -52,7 +66,7 @@ def _deterministic_brief(event, signals):
         ],
         'uncertainty': (
             '这是基于当前采集范围的描述性摘要，不代表全网总体，'
-            '不证明因果关系。'
+            '情感、聚类和质量提示均为算法筛查证据，不证明因果关系。'
         ),
         'citations': citations,
         'mode': 'deterministic',
@@ -78,6 +92,8 @@ def _llm_brief(event, signals):
         'author': item.get('author', ''),
         'text': item.get('text', '')[:600],
         'url': item.get('source_url'),
+        'sentiment': (item.get('raw') or {}).get('_algorithm', {}).get('sentiment', {}),
+        'quality_flags': (item.get('raw') or {}).get('_algorithm', {}).get('quality_flags', []),
     } for item in signals[:20]]
     schema = {
         'headline': 'string',

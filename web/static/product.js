@@ -111,6 +111,44 @@ function empty(message) {
     return `<div class="empty-state">${escapeHTML(message)}</div>`;
 }
 
+function countsLine(value, labelMap = {}) {
+    const entries = Object.entries(value || {}).filter(([, count]) => Number(count || 0) > 0);
+    return entries.length
+        ? entries.map(([key, count]) => `${labelMap[key] || key} ${fmtNumber(count)}`).join('、')
+        : '无';
+}
+
+function algorithmMeta(item) {
+    return item?.raw?._algorithm || {};
+}
+
+function sentimentMeta(item) {
+    return algorithmMeta(item).sentiment || {};
+}
+
+function qualityFlags(item) {
+    return algorithmMeta(item).quality_flags || [];
+}
+
+function algorithmChips(items, className = '') {
+    return (items || []).slice(0, 6)
+        .map((item) => `<span class="chip ${escapeHTML(className)}">${escapeHTML(item)}</span>`)
+        .join('');
+}
+
+function thresholdLine(evidence) {
+    const thresholds = Object.entries(evidence?.thresholds || {})
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(' / ');
+    const observed = Object.entries(evidence?.observed_values || {})
+        .filter(([, value]) => !Array.isArray(value))
+        .map(([key, value]) => `${key}: ${value ?? '—'}`)
+        .join(' / ');
+    return [thresholds && `阈值 ${thresholds}`, observed && `观测 ${observed}`]
+        .filter(Boolean)
+        .join('；');
+}
+
 function splitTerms(value) {
     return String(value || '')
         .replaceAll('，', ',')
@@ -318,10 +356,21 @@ async function loadSignals() {
     }
     host.innerHTML = signals.map((signal) => {
         const url = safeHref(signal.source_url);
+        const sentiment = sentimentMeta(signal);
+        const flags = qualityFlags(signal);
         const tags = [
             ...(signal.matched_terms || []).map((term) => `<span class="chip">${escapeHTML(term)}</span>`),
             ...(signal.risk_terms || []).map((term) => `<span class="chip risk">${escapeHTML(term)}</span>`)
         ].join('');
+        const sentimentLine = sentiment.method
+            ? `<div class="algorithm-strip">
+                <span>情感 ${escapeHTML(sentiment.score ?? '—')} / ${escapeHTML(sentiment.confidence || '—')}</span>
+                <span>${escapeHTML(sentiment.method)}</span>
+            </div>`
+            : '';
+        const qualityLine = flags.length
+            ? `<div class="signal-meta quality-flags">质量提示：${algorithmChips(flags, 'quality')}</div>`
+            : '';
         return `<article class="signal-card">
             <div>
                 <div class="signal-head">
@@ -333,6 +382,8 @@ async function loadSignals() {
                     </div>
                 </div>
                 <p class="signal-text">${escapeHTML(signal.text)}</p>
+                ${sentimentLine}
+                ${qualityLine}
                 <div class="signal-meta">${tags}${signal.event_title ? `<span>事件：${escapeHTML(signal.event_title)}</span>` : ''}</div>
                 ${url ? `<div class="signal-actions"><a class="button ghost" href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer">核验原文 ↗</a></div>` : ''}
             </div>
@@ -343,8 +394,9 @@ async function loadSignals() {
 
 function eventCard(event) {
     const metrics = event.metrics || {};
-    const topTerms = (metrics.top_terms || []).slice(0, 5)
+    const topTerms = (metrics.anchor_terms || metrics.top_terms || []).slice(0, 5)
         .map((term) => `<span class="chip">${escapeHTML(term)}</span>`).join('');
+    const quality = countsLine(metrics.quality_warning_counts);
     return `<article class="event-card">
         <div class="event-top">
             <div>
@@ -358,7 +410,11 @@ function eventCard(event) {
             <span><strong>${fmtNumber(metrics.sample_count)}</strong>信号</span>
             <span><strong>${escapeHTML(metrics.negative_ratio || 0)}%</strong>负面</span>
             <span><strong>${fmtNumber(metrics.source_count)}</strong>来源</span>
+            <span><strong>${escapeHTML(metrics.cohesion_score ?? '—')}%</strong>凝聚度</span>
+            <span><strong>${escapeHTML(metrics.source_mix_score ?? '—')}</strong>来源混合</span>
+            <span><strong>#${escapeHTML(metrics.representative_id || '—')}</strong>代表</span>
         </div>
+        <div class="algorithm-strip"><span>算法 ${escapeHTML(metrics.algorithm_version || '—')}</span><span>质量提示：${escapeHTML(quality)}</span></div>
         <div class="event-meta">${topTerms}</div>
         <div class="card-actions">
             <button class="primary" data-action="view-event" data-id="${escapeHTML(event.id)}">打开证据</button>
@@ -423,7 +479,17 @@ async function openEvent(eventId) {
             <span><strong>${fmtNumber(metrics.sample_count)}</strong>信号</span>
             <span><strong>${escapeHTML(metrics.negative_ratio || 0)}%</strong>负面筛查</span>
             <span><strong>${escapeHTML(metrics.heat_score || 0)}</strong>热度</span>
+            <span><strong>${escapeHTML(metrics.cohesion_score ?? '—')}%</strong>凝聚度</span>
+            <span><strong>${escapeHTML(metrics.time_span_hours ?? '—')}h</strong>跨度</span>
+            <span><strong>#${escapeHTML(metrics.representative_id || '—')}</strong>代表样本</span>
         </div>`}
+        <div class="algorithm-panel">
+            <strong>算法证据</strong>
+            <p>聚类算法：${escapeHTML(metrics.algorithm_version || '—')} · 阈值：${escapeHTML(metrics.cluster_threshold ?? '—')} · 指纹依据：${escapeHTML(metrics.fingerprint_basis || '—')}</p>
+            <p>锚定词：${algorithmChips(metrics.anchor_terms || metrics.top_terms || []) || '<span class="muted">无</span>'}</p>
+            <p>情感方法：${escapeHTML(countsLine(metrics.sentiment_method_counts))}</p>
+            <p>质量提示：${escapeHTML(countsLine(metrics.quality_warning_counts))}</p>
+        </div>
         ${visualizationDetail}
         ${briefHTML(event.latest_brief)}
         <div class="card-actions"><button class="secondary" data-action="create-brief" data-id="${escapeHTML(event.id)}">重新生成简报</button></div>
@@ -464,7 +530,10 @@ function alertCard(alert) {
             <span>项目：${escapeHTML(alert.monitor_name)}</span>
             <span>样本：${fmtNumber(evidence.sample_count)}</span>
             <span>置信提示：${escapeHTML(evidence.confidence || '—')}</span>
+            <span>规则：${escapeHTML(evidence.trigger_rule || alert.kind)}</span>
         </div>
+        ${thresholdLine(evidence) ? `<div class="algorithm-strip"><span>${escapeHTML(thresholdLine(evidence))}</span></div>` : ''}
+        <div class="algorithm-strip"><span>算法 ${escapeHTML(evidence.algorithm_version || '—')}</span><span>质量提示：${escapeHTML(countsLine(evidence.quality_warning_counts))}</span></div>
         <div class="incident-actions">
             ${alert.event_id ? `<button class="ghost" data-action="view-event" data-id="${escapeHTML(alert.event_id)}">查看证据</button>` : ''}
             ${actions.map(([status, label]) => `<button class="${status === 'false_positive' ? 'ghost' : 'secondary'}" data-action="transition-alert" data-id="${escapeHTML(alert.id)}" data-status="${escapeHTML(status)}">${escapeHTML(label)}</button>`).join('')}
@@ -489,7 +558,10 @@ function collectionDetail(job) {
     }
     const stats = job.stats || {};
     if (job.status === 'succeeded') {
-        return `<strong>入库 ${fmtNumber(stats.inserted_posts)} 条</strong><small>重复 ${fmtNumber(stats.duplicate_posts)} · 拒绝 ${fmtNumber(stats.rejected_records)}</small>`;
+        const quality = stats.quality_summary || {};
+        const flags = countsLine(quality.quality_flags);
+        const methods = countsLine(quality.sentiment_methods);
+        return `<strong>入库 ${fmtNumber(stats.inserted_posts)} 条</strong><small>重复 ${fmtNumber(stats.duplicate_posts)} · 拒绝 ${fmtNumber(stats.rejected_records)}</small><small>质量：${escapeHTML(flags)} · 情感：${escapeHTML(methods)}</small>`;
     }
     return '<small>等待任务更新</small>';
 }
@@ -520,12 +592,20 @@ function renderAnalyticsProvenance(data) {
     const methods = (provenance.sentiment_methods || [])
         .map((item) => `${item.method} ${fmtNumber(item.count)} 条`)
         .join('、') || '未记录';
+    const quality = (provenance.quality_warnings || [])
+        .map((item) => `${item.flag} ${fmtNumber(item.count)} 条`)
+        .join('、') || '无';
+    const versions = Object.entries(provenance.algorithm_versions || {})
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(' / ') || '未记录';
     host.className = `provenance-strip analytics-provenance ${provenance.data_mode === 'demo' ? 'demo' : ''}`;
     host.innerHTML = `
         <span><strong>数据性质：</strong>${escapeHTML(provenance.data_mode_label || '未标记')}</span>
         <span><strong>样本：</strong>${fmtNumber(provenance.sample_count)} / ${fmtNumber(provenance.total_available)} 条</span>
         <span><strong>观察窗口：</strong>${escapeHTML(range)}</span>
         <span><strong>情感方法：</strong>${escapeHTML(methods)}</span>
+        <span><strong>质量提示：</strong>${escapeHTML(quality)}</span>
+        <span><strong>算法版本：</strong>${escapeHTML(versions)}</span>
         <span><strong>边界：</strong>${escapeHTML(provenance.note || '')}</span>`;
 }
 
