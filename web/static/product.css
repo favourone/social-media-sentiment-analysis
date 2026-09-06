@@ -240,6 +240,10 @@ input:focus, select:focus, textarea:focus {
 .monitor-layout { display: grid; grid-template-columns: minmax(330px, .75fr) minmax(0, 1.4fr); gap: 20px; align-items: start; }
 .sticky-panel { position: sticky; top: 88px; }
 .form-panel { padding: 26px; }
+.monitor-presets { margin: 0 0 16px; padding: 12px; border: 1px solid #dbeceb; border-radius: 10px; background: #f8fcfc; }
+.monitor-presets p { margin: 0 0 9px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.monitor-presets div { display: flex; gap: 7px; flex-wrap: wrap; }
+.monitor-presets .ghost { padding: 7px 9px; color: #07545d; border-color: #c8e5e2; background: #fff; font-size: 12px; }
 .compact-form { margin-top: 0; gap: 15px; }
 .form-grid { display: grid; gap: 12px; }
 .form-grid.two { grid-template-columns: repeat(2, 1fr); }

@@ -123,6 +123,14 @@
             <div class="monitor-layout">
                 <article class="panel form-panel sticky-panel">
                     <div class="panel-title"><div><p class="kicker">NEW MONITOR</p><h2>建立监测</h2></div></div>
+                    <div class="monitor-presets" aria-label="校园监测规则预填">
+                        <p>先选一个校园场景，再按本校用语调整：</p>
+                        <div>
+                            <button class="ghost" type="button" data-action="use-monitor-preset" data-preset="network">校园网络</button>
+                            <button class="ghost" type="button" data-action="use-monitor-preset" data-preset="dining">食堂服务</button>
+                            <button class="ghost" type="button" data-action="use-monitor-preset" data-preset="safety">校园安全</button>
+                        </div>
+                    </div>
                     <form id="monitor-form" class="stack-form compact-form">
                         <label>项目名称<input name="name" maxlength="80" placeholder="例如：校园食品安全" required></label>
                         <label>任务说明<textarea name="description" maxlength="500" rows="2" placeholder="说明监测目标和判断边界"></textarea></label>
