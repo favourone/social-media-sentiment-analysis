@@ -61,7 +61,7 @@ class CollectorNormalizationTest(unittest.TestCase):
         }, topic='产品')
         self.assertEqual(post['source_id'], 'wb-1')
         self.assertEqual(post['engagement']['likes'], 12)
-        self.assertEqual(post['sentiment_method'], 'transparent_lexicon_baseline')
+        self.assertEqual(post['sentiment_method'], 'transparent_lexicon_v2')
         self.assertEqual(post['raw']['nickname'], '研究用户')
 
         weibo_date = normalize_post({
@@ -327,6 +327,18 @@ class ProductApiTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.get('/api/v1/auth/me').status_code, 401)
+
+    def test_csv_import_template_is_downloadable(self):
+        response = self.client.get('/static/templates/campus-opinion-import-template.csv')
+        try:
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(response.mimetype, {'text/csv', 'application/vnd.ms-excel'})
+            self.assertEqual(
+                response.get_data(as_text=True).strip(),
+                'id,text,created_at,source_url,likes,comments,reposts',
+            )
+        finally:
+            response.close()
 
     def test_collection_input_state_cancel_and_retry(self):
         csrf = self.login()

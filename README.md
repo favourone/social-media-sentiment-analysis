@@ -263,7 +263,7 @@ python -m coverage run --source=crawler,services,storage,web -m unittest discove
 python -m coverage report -m
 ```
 
-本机 Conda `cv` 环境的当前结果是 **42/42 通过**，包括原有 API 回归、V2 监测闭环、可视化聚合和 54 条固定演示数据的幂等验证。V2 原核心模块的历史记录覆盖率为 **82%（886/1075）**；本次新增的合成案例与可视化聚合服务为 **93%（183/196）**。复测记录见 [`docs/evidence/competition-data-visualization.md`](docs/evidence/competition-data-visualization.md)。CI 模板位于 `docs/ci/github-actions.yml`，只使用固定测试夹具和模拟采集适配路径，不连接真实社交平台。真实微博冒烟测试必须由用户扫码授权后手动执行。
+本机 Conda `cv` 环境的当前结果是 **44/44 通过**，包括原有 API 回归、V2 监测闭环、可视化聚合和 54 条固定演示数据的幂等验证。V2 原核心模块的历史记录覆盖率为 **82%（886/1075）**；本次新增的合成案例与可视化聚合服务为 **93%（183/196）**。复测记录见 [`docs/evidence/competition-data-visualization.md`](docs/evidence/competition-data-visualization.md)。已启用的 CI 工作流位于 `.github/workflows/ci.yml`，只使用固定测试夹具和模拟采集适配路径，不连接真实社交平台。真实微博冒烟测试必须由用户扫码授权后手动执行。
 
 ## 备份、恢复与故障排查
 

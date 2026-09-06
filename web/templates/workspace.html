@@ -247,16 +247,30 @@
 
         <section class="page" id="section-data">
             <div class="page-heading">
-                <div><p class="eyebrow">DATA SOURCES</p><h1>数据接入</h1><p>优先使用公开 RSS、授权微博采集或带来源信息的正式文件。</p></div>
+                <div><p class="eyebrow">DATA SOURCES</p><h1>数据接入</h1><p>把已有的公开或已授权校园信息批量接入；不需要手工逐条编写舆情。</p></div>
                 <button class="button ghost" data-goto="analytics">打开分析实验室</button>
             </div>
+            <article class="panel onboarding-panel">
+                <div class="panel-title"><div><p class="kicker">START WITH REAL DATA</p><h2>三步接入真实校园信息</h2><p>先从有权限导出的工单、意见箱或公开信息开始；系统的价值在于从一批记录中发现共性和突增，而不是替你重复录入已知内容。</p></div></div>
+                <div class="onboarding-steps">
+                    <div class="onboarding-step"><span>01</span><div><strong>批量导出</strong><p>从报修、意见箱、问卷后台或公开信息汇总中导出 CSV；每条保留正文和时间。</p></div></div>
+                    <div class="onboarding-step"><span>02</span><div><strong>最小化与脱敏</strong><p>删除姓名、学号、手机号、账号和精确房间号；只保留处理问题所需的信息。</p></div></div>
+                    <div class="onboarding-step"><span>03</span><div><strong>上传并创建监测</strong><p>上传文件后选一个校园场景，核验原文，再人工处置真正需要跟进的事件。</p></div></div>
+                </div>
+                <div class="onboarding-actions">
+                    <a class="secondary" href="{{ url_for('static', filename='templates/campus-opinion-import-template.csv') }}" download>下载空白 CSV 模板</a>
+                    <button class="ghost" type="button" data-action="use-monitor-preset" data-preset="network">预填“校园网络”规则</button>
+                    <button class="ghost" type="button" data-action="use-monitor-preset" data-preset="dining">预填“食堂服务”规则</button>
+                    <button class="ghost" type="button" data-action="use-monitor-preset" data-preset="safety">预填“校园安全”规则</button>
+                </div>
+            </article>
             <div class="two-column">
                 <article class="panel">
                     <div class="panel-title"><div><p class="kicker">FILE IMPORT</p><h2>导入现有数据</h2></div></div>
                     <form id="import-form" class="stack-form">
                         <label>话题名称<input name="topic" placeholder="例如：校园食品与餐饮安全" required></label>
                         <label>数据文件<input name="file" type="file" accept=".json,.jsonl,.ndjson,.csv" required></label>
-                        <p class="help">最大 10 MB。正文必填，建议包含原始 ID、作者、时间和来源链接。</p>
+                        <p class="help">最大 10 MB。正文必填，建议包含原始 ID、时间和来源链接；Excel 请另存为“CSV UTF-8（逗号分隔）”。</p>
                         <button class="secondary" type="submit">上传并入库</button>
                     </form>
                 </article>

@@ -1,9 +1,10 @@
-# Reference copy of the active workflow at .github/workflows/ci.yml.
 name: CI
 
 on:
   push:
-    branches: [main, product/v1, product/v2]
+    branches:
+      - main
+      - school0906
   pull_request:
 
 jobs:

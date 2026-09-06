@@ -212,6 +212,15 @@ input:focus, select:focus, textarea:focus {
 .dashboard-grid .panel { margin-bottom: 0; }
 .panel-title { min-height: 38px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
 .panel-title h2, .panel > h2 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+.onboarding-panel { border-color: #cce8e5; background: linear-gradient(120deg, #f8fffe, #fff); }
+.onboarding-panel .panel-title p:not(.kicker) { max-width: 780px; margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+.onboarding-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.onboarding-step { display: flex; gap: 11px; min-width: 0; padding: 15px; border: 1px solid #dbeceb; border-radius: 12px; background: rgba(255, 255, 255, .78); }
+.onboarding-step > span { display: grid; flex: 0 0 28px; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: #07545d; background: #d9f4f1; font-size: 11px; font-weight: 850; }
+.onboarding-step strong { color: var(--navy); font-size: 13px; }
+.onboarding-step p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.onboarding-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 15px; }
+.onboarding-actions .secondary, .onboarding-actions .ghost { padding: 8px 11px; font-size: 12px; }
 
 .rank-list, .compact-list, .monitor-list, .signal-list, .incident-list { display: grid; gap: 12px; }
 .rank-item { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid #edf1f4; }
@@ -491,6 +500,7 @@ code { padding: 2px 5px; color: #86440e; background: #fff0df; border-radius: 4px
     .span-5, .span-7 { grid-column: span 12; }
     .event-grid { grid-template-columns: repeat(2, 1fr); }
     .monitor-layout { grid-template-columns: 1fr; }
+    .onboarding-steps { grid-template-columns: 1fr; }
     .sticky-panel { position: static; }
     .run-strip { grid-template-columns: repeat(3, 1fr); }
     .analysis-result-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

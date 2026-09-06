@@ -39,6 +39,29 @@ const kindNames = {
     negative_ratio: '负面比例',
     volume_spike: '讨论量突增'
 };
+const monitorPresets = {
+    network: {
+        name: '校园网络与信息服务',
+        description: '发现校园网络、教务系统和数字服务中的集中故障反馈。',
+        keywords: '校园网, 无线网, 断网, 教务系统, 无法登录',
+        excluded_terms: '招聘, 广告',
+        risk_terms: '故障, 崩溃, 无法使用, 影响上课, 投诉'
+    },
+    dining: {
+        name: '校园食品与餐饮服务',
+        description: '发现食堂供餐、卫生和排队体验中的集中反馈。',
+        keywords: '食堂, 餐饮, 饭菜, 排队, 外卖',
+        excluded_terms: '招聘, 广告',
+        risk_terms: '异物, 变质, 腹泻, 中毒, 卫生, 投诉'
+    },
+    safety: {
+        name: '校园安全与反诈',
+        description: '发现反诈、治安、消防和突发安全风险的公开信号。',
+        keywords: '反诈, 诈骗, 安全, 治安, 消防',
+        excluded_terms: '招聘, 广告',
+        risk_terms: '被骗, 转账, 盗窃, 火灾, 危险, 紧急'
+    }
+};
 
 const escapeHTML = (value) => String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -155,6 +178,17 @@ function splitTerms(value) {
         .split(/[,\n]/)
         .map((item) => item.trim())
         .filter(Boolean);
+}
+
+function applyMonitorPreset(name) {
+    const preset = monitorPresets[name];
+    if (!preset) throw new Error('未找到该校园监测模板');
+    const form = document.getElementById('monitor-form');
+    Object.entries(preset).forEach(([field, value]) => {
+        if (form.elements[field]) form.elements[field].value = value;
+    });
+    activateSection('monitors');
+    window.setTimeout(() => form.elements.name.focus(), 0);
 }
 
 function activateSection(name) {
@@ -984,6 +1018,9 @@ document.addEventListener('click', async (event) => {
             await api(`/api/v2/monitors/${encodeURIComponent(button.dataset.id)}/run`, {method: 'POST'});
             notify('监测运行已提交');
             await Promise.all([loadMonitors(), loadOverview()]);
+        } else if (button.dataset.action === 'use-monitor-preset') {
+            applyMonitorPreset(button.dataset.preset);
+            notify('已预填监测规则，请按本校实际用语调整后创建');
         } else if (button.dataset.action === 'monitor-status') {
             await api(`/api/v2/monitors/${encodeURIComponent(button.dataset.id)}/status`, {
                 method: 'POST',
@@ -1062,7 +1099,7 @@ document.getElementById('import-form').addEventListener('submit', async (event) 
             method: 'POST',
             body: new FormData(formElement)
         });
-        notify('数据已提交导入');
+        notify('数据已提交导入。完成后请创建监测项目并运行一次。');
         formElement.reset();
         await loadCollection();
     } catch (error) {
