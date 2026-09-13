@@ -18,6 +18,20 @@ from services.task_queue import QueueUnavailable, dispatch, queue_status
 from storage.product_store import ProductStore, get_product_store, reset_store_cache
 from web.app import app
 
+_ORIGINAL_ENGINES = None
+
+
+def setUpModule():
+    """工作流回归覆盖词典基线行为，显式固定引擎，避免被 .env 配置影响。"""
+    global _ORIGINAL_ENGINES
+    _ORIGINAL_ENGINES = (config.SENTIMENT_ENGINE, config.CLUSTERING_ENGINE)
+    config.SENTIMENT_ENGINE = 'lexicon'
+    config.CLUSTERING_ENGINE = 'ngram'
+
+
+def tearDownModule():
+    config.SENTIMENT_ENGINE, config.CLUSTERING_ENGINE = _ORIGINAL_ENGINES
+
 
 class ProductStoreTest(unittest.TestCase):
     def setUp(self):

@@ -128,6 +128,32 @@ SIR_TIME_SPAN = 30       # 预测时间跨度（天）
 ARIMA_ORDER = (2, 1, 2)  # (p, d, q) 参数
 ARIMA_FORECAST_DAYS = 7  # 预测天数
 
+# ==================== 算法升级 V3（suanfa 分支） ====================
+# 情感分析引擎：auto=存在微调检查点时优先 BERT，否则回退透明词典；
+# bert=强制 BERT（无检查点时报错并回退）；lexicon=只用词典。
+SENTIMENT_ENGINE = os.environ.get('SENTIMENT_ENGINE', 'auto').strip().lower()
+SENTIMENT_BERT_MODEL_DIR = os.path.abspath(os.environ.get(
+    'SENTIMENT_BERT_MODEL_DIR', os.path.join(MODEL_DIR, 'bert_sentiment')
+))
+SENTIMENT_BERT_MAX_LENGTH = int(os.environ.get('SENTIMENT_BERT_MAX_LENGTH', 128))
+SENTIMENT_BERT_DEVICE = os.environ.get('SENTIMENT_BERT_DEVICE', '').strip()
+
+# 事件聚类引擎：ngram=字符 n-gram TF-IDF 基线（默认，稳定可复现）；
+# auto=信号量足够且依赖可用时用 BERTopic，否则自动回退 ngram；bertopic=强制尝试。
+CLUSTERING_ENGINE = os.environ.get('CLUSTERING_ENGINE', 'ngram').strip().lower()
+BERTOPIC_EMBEDDING_MODEL = os.environ.get(
+    'BERTOPIC_EMBEDDING_MODEL', 'paraphrase-multilingual-MiniLM-L12-v2'
+)
+BERTOPIC_MIN_TOPIC_SIZE = int(os.environ.get('BERTOPIC_MIN_TOPIC_SIZE', 3))
+BERTOPIC_MIN_DOCS = int(os.environ.get('BERTOPIC_MIN_DOCS', 8))
+BERTOPIC_RANDOM_STATE = int(os.environ.get('BERTOPIC_RANDOM_STATE', 42))
+
+# 混合趋势预测：ARIMA/SIR 基线 + LSTM 残差修正（SIR 形状约束作为损失先验）。
+HYBRID_FORECAST_DAYS = int(os.environ.get('HYBRID_FORECAST_DAYS', 7))
+HYBRID_HIDDEN_SIZE = int(os.environ.get('HYBRID_HIDDEN_SIZE', 24))
+HYBRID_EPOCHS = int(os.environ.get('HYBRID_EPOCHS', 300))
+HYBRID_SIR_PRIOR_WEIGHT = float(os.environ.get('HYBRID_SIR_PRIOR_WEIGHT', 0.15))
+
 # ==================== Web 配置 ====================
 WEB_HOST = '0.0.0.0'
 WEB_PORT = int(os.environ.get('WEB_PORT', 5000))

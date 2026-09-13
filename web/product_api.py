@@ -381,10 +381,10 @@ def create_analysis_job():
     if not isinstance(payload, dict):
         return error('invalid_json', '请求体必须是 JSON 对象', 400)
     analysis_type = str(payload.get('type', 'full')).strip().lower()
-    if analysis_type not in {'summary', 'lda', 'arima', 'sir', 'full'}:
+    if analysis_type not in {'summary', 'lda', 'arima', 'sir', 'hybrid', 'full'}:
         return error(
             'unsupported_analysis',
-            '分析类型必须是 summary、lda、arima、sir 或 full', 400
+            '分析类型必须是 summary、lda、arima、sir、hybrid 或 full', 400
         )
     try:
         filters = _filters(payload)

@@ -210,6 +210,69 @@ def _sir_analysis(posts):
     }
 
 
+def _hybrid_analysis(posts):
+    """ARIMA/SIR 基线 + LSTM 残差的混合趋势预测（按日聚合讨论量）。"""
+    from collections import defaultdict
+
+    daily_counts = Counter()
+    daily_sentiment = defaultdict(list)
+    daily_engagement = Counter()
+    for post in posts:
+        day = (post.get('published_at') or '')[:10]
+        if not day:
+            continue
+        daily_counts[day] += 1
+        daily_sentiment[day].append(1 if post.get('sentiment') == 1 else 0)
+        daily_engagement[day] += sum(
+            int(value or 0)
+            for value in (post.get('engagement') or {}).values()
+        )
+    days = sorted(daily_counts)
+    counts = [daily_counts[day] for day in days]
+    sentiment = [
+        sum(daily_sentiment[day]) / max(len(daily_sentiment[day]), 1)
+        for day in days
+    ]
+    engagement = [daily_engagement[day] for day in days]
+    result = {'observed_points': len(counts), 'dates': days, 'counts': counts}
+    if len(counts) < 10:
+        result.update({
+            'available': False,
+            'reason': '混合预测至少需要 10 个日观测点',
+        })
+        return result
+    try:
+        from models.hybrid_predictor import (
+            HAS_TORCH,
+            HYBRID_TREND_ALGORITHM_VERSION,
+            HybridPredictor,
+        )
+    except ImportError:
+        result.update({'available': False, 'reason': '混合预测依赖不可用'})
+        return result
+    if not HAS_TORCH:
+        result.update({
+            'available': False,
+            'reason': '未安装 PyTorch，混合预测不可用；ARIMA 与 SIR 基线仍可单独使用',
+        })
+        return result
+    try:
+        predictor = HybridPredictor()
+        predictor.fit(counts, sentiment=sentiment, engagement=engagement)
+        forecast = predictor.predict()
+    except Exception as exc:
+        LOGGER.warning('Hybrid component unavailable: %s', type(exc).__name__)
+        result.update({'available': False, 'reason': '混合预测无法在当前序列上稳定拟合'})
+        return result
+    result.update({
+        'available': True,
+        'algorithm_version': HYBRID_TREND_ALGORITHM_VERSION,
+        'forecast': forecast,
+        'claim_scope': '混合预测是统计外推与传播情景的组合，不证明因果关系',
+    })
+    return result
+
+
 def run_analysis_job(job_id):
     store = get_product_store()
     job = store.get_analysis_job(job_id)
@@ -278,6 +341,9 @@ def run_analysis_job(job_id):
             result['arima'] = _time_series_analysis(posts)
         if analysis_type in {'full', 'sir'}:
             result['sir'] = _sir_analysis(posts)
+        if analysis_type in {'full', 'hybrid'}:
+            store.update_analysis_job(job_id, progress=85)
+            result['hybrid'] = _hybrid_analysis(posts)
         if not _still_active(store.get_analysis_job(job_id)):
             return
         if not monitor_id:

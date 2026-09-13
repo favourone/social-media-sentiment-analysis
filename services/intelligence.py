@@ -7,10 +7,13 @@ import hashlib
 import logging
 import math
 import re
+import threading
 import uuid
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
+import config
+import numpy as np
 import jieba.analyse
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -19,7 +22,7 @@ from crawler.adapters import (
     CollectorError,
     CollectorPaused,
     QUALITY_ALGORITHM_VERSION,
-    SENTIMENT_ALGORITHM_VERSION,
+    active_sentiment_algorithm_version,
     get_collector,
     summarize_quality,
 )
@@ -33,15 +36,42 @@ MAX_CLUSTER_SIGNALS = 500
 CLUSTER_THRESHOLD = 0.38
 MATCHING_ALGORITHM_VERSION = 'keyword_rule_v2'
 CLUSTERING_ALGORITHM_VERSION = 'char_ngram_tfidf_v2'
+BERTOPIC_CLUSTERING_ALGORITHM_VERSION = 'bertopic_v3'
 ALERT_ALGORITHM_VERSION = 'explainable_alert_rules_v2'
+BASELINE_TREND_ALGORITHM_VERSION = 'arima_sir_baseline_v2'
+_SENTENCE_EMBEDDER = None
+_SENTENCE_EMBEDDER_LOCK = threading.Lock()
+
+
+def active_clustering_algorithm_version():
+    """Report the clustering version the configured engine resolves to."""
+    engine = str(getattr(config, 'CLUSTERING_ENGINE', 'ngram')).strip().lower()
+    if engine in ('auto', 'bertopic'):
+        try:
+            import bertopic  # noqa: F401 - availability probe only
+
+            return BERTOPIC_CLUSTERING_ALGORITHM_VERSION
+        except ImportError:
+            pass
+    return CLUSTERING_ALGORITHM_VERSION
+
+
+def active_trend_algorithm_version():
+    try:
+        from models.hybrid_predictor import HYBRID_TREND_ALGORITHM_VERSION
+
+        return HYBRID_TREND_ALGORITHM_VERSION
+    except ImportError:
+        return BASELINE_TREND_ALGORITHM_VERSION
 
 
 def algorithm_versions():
     return {
-        'sentiment': SENTIMENT_ALGORITHM_VERSION,
+        'sentiment': active_sentiment_algorithm_version(),
         'quality': QUALITY_ALGORITHM_VERSION,
         'matching': MATCHING_ALGORITHM_VERSION,
-        'clustering': CLUSTERING_ALGORITHM_VERSION,
+        'clustering': active_clustering_algorithm_version(),
+        'trend_forecast': active_trend_algorithm_version(),
         'alerting': ALERT_ALGORITHM_VERSION,
     }
 
@@ -323,16 +353,9 @@ def _event_metrics(
     }
 
 
-def cluster_signals(monitor_id, signals, threshold=CLUSTER_THRESHOLD):
-    """Group related signals with deterministic character n-gram similarity."""
-    signals = sorted(list(signals), key=_signal_sort_key)[:MAX_CLUSTER_SIGNALS]
-    if not signals:
-        return []
-    texts = [
-        re.sub(r'\s+', ' ', str(item.get('text', ''))).strip()
-        for item in signals
-    ]
-    parents = list(range(len(signals)))
+def _ngram_groups(texts, threshold):
+    """Deterministic char n-gram TF-IDF grouping (transparent baseline)."""
+    parents = list(range(len(texts)))
     similarities = None
 
     def find(index):
@@ -346,22 +369,169 @@ def cluster_signals(monitor_id, signals, threshold=CLUSTER_THRESHOLD):
         if root_left != root_right:
             parents[root_right] = root_left
 
-    if len(signals) > 1 and any(texts):
+    if len(texts) > 1 and any(texts):
         try:
             vectors = TfidfVectorizer(
                 analyzer='char', ngram_range=(2, 4), min_df=1, max_features=6000
             ).fit_transform(texts)
             similarities = cosine_similarity(vectors)
-            for left in range(len(signals)):
-                for right in range(left + 1, len(signals)):
+            for left in range(len(texts)):
+                for right in range(left + 1, len(texts)):
                     if similarities[left, right] >= threshold:
                         union(left, right)
         except ValueError:
             LOGGER.info('Event clustering fell back to singleton groups')
 
     groups = defaultdict(list)
-    for index, signal in enumerate(signals):
-        groups[find(index)].append((index, signal))
+    for index in range(len(texts)):
+        groups[find(index)].append(index)
+    return list(groups.values()), similarities
+
+
+def _sentence_embedder():  # pragma: no cover - CI 未安装 sentence-transformers
+    global _SENTENCE_EMBEDDER
+    if _SENTENCE_EMBEDDER is None:
+        with _SENTENCE_EMBEDDER_LOCK:
+            if _SENTENCE_EMBEDDER is None:
+                from sentence_transformers import SentenceTransformer
+
+                _SENTENCE_EMBEDDER = SentenceTransformer(
+                    config.BERTOPIC_EMBEDDING_MODEL
+                )
+    return _SENTENCE_EMBEDDER
+
+
+def _cosine_matrix(embeddings):  # pragma: no cover - 仅 BERTopic 路径使用
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    normalized = embeddings / np.maximum(norms, 1e-12)
+    return normalized @ normalized.T
+
+
+def _group_by_bertopic(texts, embeddings=None):  # pragma: no cover - CI 无 bertopic，由 cv 环境 test_suanfa_algorithms 覆盖
+    """Semantic grouping via BERTopic; returns (groups, similarity, meta).
+
+    ``embeddings`` 参数允许测试注入确定性向量，避免在 CI 中下载模型。
+    ``language=None`` 是必需的：默认 ``english`` 会触发 BERTopic 内部的
+    ASCII 清洗，把中文正文剥成空文档。
+    """
+    from bertopic import BERTopic
+    from hdbscan import HDBSCAN
+    from sklearn.feature_extraction.text import CountVectorizer
+    from umap import UMAP
+
+    texts = list(texts)
+    if embeddings is None:
+        embeddings = _sentence_embedder().encode(
+            texts, show_progress_bar=False, normalize_embeddings=True
+        )
+    embeddings = np.asarray(embeddings, dtype=float)
+    count = len(texts)
+    umap_model = UMAP(
+        n_neighbors=max(2, min(15, count - 1)),
+        n_components=max(2, min(5, count - 1)),
+        min_dist=0.0,
+        metric='cosine',
+        random_state=config.BERTOPIC_RANDOM_STATE,
+    )
+    hdbscan_model = HDBSCAN(
+        min_cluster_size=config.BERTOPIC_MIN_TOPIC_SIZE,
+        metric='euclidean',
+        cluster_selection_method='eom',
+        prediction_data=True,
+    )
+    vectorizer_model = CountVectorizer(tokenizer=jieba.lcut, token_pattern=None)
+    topic_model = BERTopic(
+        embedding_model=None,
+        language=None,
+        vectorizer_model=vectorizer_model,
+        min_topic_size=config.BERTOPIC_MIN_TOPIC_SIZE,
+        umap_model=umap_model,
+        hdbscan_model=hdbscan_model,
+        calculate_probabilities=False,
+        verbose=False,
+    )
+    topics, _probabilities = topic_model.fit_transform(texts, embeddings=embeddings)
+
+    grouped = defaultdict(list)
+    for index, topic in enumerate(topics):
+        grouped[int(topic)].append(index)
+    groups = []
+    outlier_count = 0
+    for topic in sorted(grouped):
+        members = grouped[topic]
+        if topic == -1:
+            # HDBSCAN 噪声点不强行归组，保持为独立事件（与基线行为一致）。
+            outlier_count = len(members)
+            groups.extend([member] for member in members)
+        else:
+            groups.append(members)
+    meta = {
+        'engine': 'bertopic',
+        'embedding_model': config.BERTOPIC_EMBEDDING_MODEL,
+        'min_topic_size': config.BERTOPIC_MIN_TOPIC_SIZE,
+        'random_state': config.BERTOPIC_RANDOM_STATE,
+        'n_topics': len([topic for topic in grouped if topic != -1]),
+        'outlier_count': outlier_count,
+    }
+    try:
+        topic_terms = {}
+        for topic in sorted(grouped):
+            if topic == -1:
+                continue
+            words = topic_model.get_topic(topic) or []
+            topic_terms[str(topic)] = [word for word, _weight in words[:6]]
+        meta['topic_terms'] = topic_terms
+    except Exception:  # noqa: BLE001 - 主题词仅用于解释，失败不影响聚类结果
+        pass
+    return groups, _cosine_matrix(embeddings), meta
+
+
+def _group_signals(texts, threshold):
+    """Dispatch to the configured clustering engine with explicit fallback."""
+    engine = str(getattr(config, 'CLUSTERING_ENGINE', 'ngram')).strip().lower()
+    minimum_docs = max(
+        int(getattr(config, 'BERTOPIC_MIN_DOCS', 8)),
+        int(getattr(config, 'BERTOPIC_MIN_TOPIC_SIZE', 3)),
+    )
+    if engine in ('auto', 'bertopic') and len(texts) >= minimum_docs:
+        try:
+            groups, similarities, meta = _group_by_bertopic(texts)
+            if groups:
+                return (
+                    groups,
+                    similarities,
+                    BERTOPIC_CLUSTERING_ALGORITHM_VERSION,
+                    meta,
+                )
+        except Exception as exc:  # noqa: BLE001 - 聚类失败显式回退
+            LOGGER.warning(
+                'BERTopic 聚类不可用，回退到字符 n-gram 基线：%s', exc
+            )
+    groups, similarities = _ngram_groups(texts, threshold)
+    return (
+        groups,
+        similarities,
+        CLUSTERING_ALGORITHM_VERSION,
+        {'engine': 'char_ngram_tfidf', 'threshold': threshold},
+    )
+
+
+def cluster_signals(monitor_id, signals, threshold=CLUSTER_THRESHOLD):
+    """Group related signals into auditable events.
+
+    引擎顺序：CLUSTERING_ENGINE 配置的语义聚类（BERTopic）> 字符 n-gram TF-IDF 基线。
+    每个事件都会记录实际使用的算法版本，便于证据追溯。
+    """
+    signals = sorted(list(signals), key=_signal_sort_key)[:MAX_CLUSTER_SIGNALS]
+    if not signals:
+        return []
+    texts = [
+        re.sub(r'\s+', ' ', str(item.get('text', ''))).strip()
+        for item in signals
+    ]
+    groups, similarities, algorithm_version, clustering_meta = _group_signals(
+        texts, threshold
+    )
 
     def group_cohesion(indexes):
         if len(indexes) <= 1:
@@ -377,10 +547,9 @@ def cluster_signals(monitor_id, signals, threshold=CLUSTER_THRESHOLD):
         return round(sum(values) / len(values) * 100, 1)
 
     events = []
-    for grouped_pairs in groups.values():
-        grouped_pairs = sorted(grouped_pairs, key=lambda pair: _signal_sort_key(pair[1]))
-        indexes = [index for index, _signal in grouped_pairs]
-        grouped = [_signal for _index, _signal in grouped_pairs]
+    for indexes in groups:
+        indexes = sorted(indexes, key=lambda index: _signal_sort_key(signals[index]))
+        grouped = [signals[index] for index in indexes]
         combined = '\n'.join(item.get('text', '') for item in grouped)
         top_terms = _extract_terms(combined)
         stable_material = '|'.join(top_terms[:5])
@@ -406,6 +575,8 @@ def cluster_signals(monitor_id, signals, threshold=CLUSTER_THRESHOLD):
             cohesion_score=group_cohesion(indexes),
             fingerprint_basis=fingerprint_basis,
         )
+        metrics['algorithm_version'] = algorithm_version
+        metrics['clustering_engine'] = clustering_meta
         title = _event_title(grouped, top_terms)
         quality_note = ''
         if metrics['quality_warning_counts']:

@@ -24,10 +24,25 @@ from crawler.rss_adapter import RSSFeedAdapter, parse_feed
 from services.briefing import _extract_json, _llm_brief
 from services.delivery import deliver_webhook
 from services.intelligence import cluster_signals, evaluate_post
+from services.intelligence import CLUSTERING_ALGORITHM_VERSION as NGRAM_CLUSTERING_VERSION
 from services.network_safety import UnsafeURL, validate_outbound_url
 from storage.monitor_store import MonitorStore
 from storage.product_store import ProductStore, get_product_store, reset_store_cache
 from web.app import app
+
+_ORIGINAL_ENGINES = None
+
+
+def setUpModule():
+    """这些用例验证词典与 n-gram 基线契约，显式固定引擎，避免被 .env 配置影响。"""
+    global _ORIGINAL_ENGINES
+    _ORIGINAL_ENGINES = (config.SENTIMENT_ENGINE, config.CLUSTERING_ENGINE)
+    config.SENTIMENT_ENGINE = 'lexicon'
+    config.CLUSTERING_ENGINE = 'ngram'
+
+
+def tearDownModule():
+    config.SENTIMENT_ENGINE, config.CLUSTERING_ENGINE = _ORIGINAL_ENGINES
 
 
 class RSSAndNetworkSafetyTest(unittest.TestCase):
@@ -182,6 +197,37 @@ class MonitoringLogicTest(unittest.TestCase):
         self.assertIn('投诉', metrics['anchor_terms'] + metrics['risk_terms'])
         self.assertEqual(metrics['sentiment_method_counts']['transparent_lexicon_v2'], 4)
         self.assertEqual(metrics['quality_warning_counts']['lexicon_sentiment_used'], 4)
+
+    def test_clustering_engine_falls_back_to_ngram_when_bertopic_fails(self):
+        signals = [
+            {
+                'id': index + 1,
+                'platform': 'weibo',
+                'source_id': f's-{index}',
+                'text': f'校园食堂食品安全投诉事件调查处理进展 {index}',
+                'published_at': f'2026-07-22T1{index}:00:00+08:00',
+                'fetched_at': '2026-07-22T14:00:00+08:00',
+                'sentiment': 0,
+                'engagement': {'likes': index},
+                'risk_terms': ['投诉'],
+                'raw': {},
+            }
+            for index in range(9)
+        ]
+        config.CLUSTERING_ENGINE = 'bertopic'
+        try:
+            with patch(
+                'services.intelligence._group_by_bertopic',
+                side_effect=RuntimeError('模拟依赖缺失'),
+            ):
+                events = cluster_signals('monitor-fallback', signals)
+        finally:
+            config.CLUSTERING_ENGINE = 'ngram'
+        self.assertEqual(len(events), 1)
+        self.assertEqual(
+            events[0]['metrics']['algorithm_version'],
+            NGRAM_CLUSTERING_VERSION,
+        )
 
     def test_store_keeps_alert_lifecycle_and_redacts_delivery_destination(self):
         with tempfile.TemporaryDirectory() as temp:

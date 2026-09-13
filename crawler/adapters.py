@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import logging
 import os
 import re
 import subprocess
@@ -23,6 +24,12 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import config
+
+from models.bert_sentiment import (
+    BERT_SENTIMENT_ALGORITHM_VERSION,
+    checkpoint_ready,
+    get_bert_sentiment,
+)
 
 
 class CollectorError(RuntimeError):
@@ -103,6 +110,8 @@ NEGATION_WORDS = {'不', '没', '没有', '无', '未', '并非', '不是', '别
 INTENSIFIERS = {'很', '非常', '特别', '严重', '大量', '持续', '反复', '多次', '集中'}
 SENTIMENT_ALGORITHM_VERSION = 'transparent_lexicon_v2'
 QUALITY_ALGORITHM_VERSION = 'record_quality_v1'
+LOGGER = logging.getLogger(__name__)
+_BERT_FALLBACK_LOGGED = False
 
 
 def _hits(text, words):
@@ -110,7 +119,11 @@ def _hits(text, words):
 
 
 def score_sentiment(text, raw_value=None):
-    """Return a transparent sentiment screen while keeping binary compatibility."""
+    """Return a transparent sentiment screen while keeping binary compatibility.
+
+    引擎顺序：来源标签 > 微调 BERT（按 SENTIMENT_ENGINE 配置）> 透明词典。
+    任一环节失败都显式降级，不会静默伪造结果。
+    """
     value = str(text or '')
     if raw_value in (0, 1, '0', '1'):
         label = int(raw_value)
@@ -130,6 +143,50 @@ def score_sentiment(text, raw_value=None):
             },
             'caveats': ['优先采用来源提供的情感标签，仍需结合原文人工复核。'],
         }
+    lexicon_result = _lexicon_sentiment(value)
+    bert_result = _try_bert_sentiment(value, lexicon_result)
+    if bert_result is not None:
+        return bert_result
+    return lexicon_result
+
+
+def _try_bert_sentiment(value, lexicon_result):
+    """Run the fine-tuned BERT classifier when the engine enables it."""
+    global _BERT_FALLBACK_LOGGED
+    engine = str(getattr(config, 'SENTIMENT_ENGINE', 'auto')).strip().lower()
+    if engine not in ('auto', 'bert'):
+        return None
+    try:
+        model = get_bert_sentiment()
+        if engine == 'auto' and not model.available:
+            return None
+        result = model.analyze(value)
+    except Exception as exc:  # noqa: BLE001 - 显式降级，不中断采集
+        if not _BERT_FALLBACK_LOGGED:
+            LOGGER.warning('BERT 情感分析不可用，已回退到透明词典：%s', exc)
+            _BERT_FALLBACK_LOGGED = True
+        return None
+    if result is None:
+        return None
+    evidence = lexicon_result['evidence']
+    result['evidence'] = {
+        'model_path': result.get('model_path'),
+        'positive_probability': result.get('positive_probability'),
+        'lexicon_cross_check': {
+            'positive_terms': evidence.get('positive_terms', []),
+            'negative_terms': evidence.get('negative_terms', []),
+            'risk_terms': evidence.get('risk_terms', []),
+            'lexicon_score': lexicon_result['score'],
+        },
+    }
+    result['caveats'] = [
+        'BERT 情感标签由微调模型给出，仅用于筛查，仍需结合原文人工复核。',
+        '词典命中仅作交叉核对证据，不参与最终标签。',
+    ]
+    return result
+
+
+def _lexicon_sentiment(value):
     positive_terms = _hits(value, POSITIVE_WORDS)
     negative_terms = _hits(value, NEGATIVE_WORDS)
     risk_terms = _hits(value, RISK_WORDS)
@@ -179,6 +236,18 @@ def infer_sentiment(text, raw_value=None):
     return result['label'], result['method']
 
 
+def active_sentiment_algorithm_version():
+    """Report the sentiment version the configured engine will actually use."""
+    engine = str(getattr(config, 'SENTIMENT_ENGINE', 'auto')).strip().lower()
+    if engine in ('auto', 'bert'):
+        try:
+            if engine == 'bert' or checkpoint_ready():
+                return BERT_SENTIMENT_ALGORITHM_VERSION
+        except OSError:
+            pass
+    return SENTIMENT_ALGORITHM_VERSION
+
+
 def _algorithm_bucket(record):
     raw = dict(record or {})
     bucket = raw.get('_algorithm')
@@ -205,6 +274,8 @@ def assess_record_quality(post, source_record=None, generated_source_id=False):
     method = sentiment.get('method') or post.get('sentiment_method')
     if method == 'source_label':
         flags.append('source_sentiment_label_used')
+    elif method and method.startswith('bert'):
+        flags.append('bert_sentiment_used')
     elif method:
         flags.append('lexicon_sentiment_used')
     if source_record and source_record.get('feed_url') and not source_record.get('url'):

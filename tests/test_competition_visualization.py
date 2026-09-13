@@ -12,6 +12,20 @@ from services.visualization import build_visual_story
 from storage.product_store import get_product_store, reset_store_cache
 from web.app import app
 
+_ORIGINAL_ENGINES = None
+
+
+def setUpModule():
+    """竞赛演示与可视化叙事依赖确定性 n-gram 基线，这里固定引擎配置。"""
+    global _ORIGINAL_ENGINES
+    _ORIGINAL_ENGINES = (config.SENTIMENT_ENGINE, config.CLUSTERING_ENGINE)
+    config.SENTIMENT_ENGINE = 'lexicon'
+    config.CLUSTERING_ENGINE = 'ngram'
+
+
+def tearDownModule():
+    config.SENTIMENT_ENGINE, config.CLUSTERING_ENGINE = _ORIGINAL_ENGINES
+
 
 class VisualStoryAggregateTest(unittest.TestCase):
     def test_story_preserves_totals_provenance_and_network_meaning(self):

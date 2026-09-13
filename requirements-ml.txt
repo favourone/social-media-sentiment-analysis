@@ -1,0 +1,8 @@
+# 算法升级 V3（suanfa 分支）的深度学习扩展依赖。
+# 核心功能不依赖这些包；安装后 SENTIMENT_ENGINE=auto、CLUSTERING_ENGINE=auto
+# 才会启用微调 BERT 与 BERTopic 语义聚类，失败时自动回退词典 / n-gram 基线。
+# PyTorch 请按官方指引选择对应 CUDA/CPU 版本：https://pytorch.org/get-started/locally/
+
+transformers>=4.40
+sentence-transformers>=2.7
+bertopic>=0.16
