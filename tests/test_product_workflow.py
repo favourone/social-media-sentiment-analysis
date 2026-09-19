@@ -5,8 +5,10 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from threading import Event
 from unittest.mock import patch
 
 import config
@@ -59,6 +61,21 @@ class ProductStoreTest(unittest.TestCase):
         self.assertEqual(self.store.insert_posts(job['id'], [post]), 1)
         self.assertEqual(self.store.insert_posts(job['id'], [post]), 0)
         self.assertEqual(len(self.store.list_posts()), 1)
+
+    def test_analysis_conditional_updates_preserve_cancellation(self):
+        job = self.store.create_analysis_job('hybrid')
+        cancelled = self.store.update_analysis_job(
+            job['id'], expected_statuses={'pending', 'running'},
+            status='cancelled',
+        )
+        self.assertEqual(cancelled['status'], 'cancelled')
+        self.assertIsNone(self.store.update_analysis_job(
+            job['id'], expected_statuses={'pending'}, status='running',
+        ))
+        self.assertIsNone(self.store.update_analysis_job(
+            job['id'], expected_statuses={'running'}, status='succeeded',
+        ))
+        self.assertEqual(self.store.get_analysis_job(job['id'])['status'], 'cancelled')
 
 
 class CollectorNormalizationTest(unittest.TestCase):
@@ -230,6 +247,29 @@ MAX_CONCURRENCY_NUM = 1
 
 
 class TaskQueueTest(unittest.TestCase):
+    def test_local_background_dispatch_returns_before_task_finishes(self):
+        original_mode = config.TASK_QUEUE_MODE
+        started = Event()
+        release = Event()
+        finished = Event()
+
+        def slow_task():
+            started.set()
+            release.wait(timeout=5)
+            finished.set()
+
+        try:
+            config.TASK_QUEUE_MODE = 'inline'
+            with patch('services.task_queue._resolve', return_value=slow_task):
+                result = dispatch('fake.slow_task', background=True)
+            self.assertEqual(result['mode'], 'local_background')
+            self.assertTrue(started.wait(timeout=2))
+            self.assertFalse(finished.is_set())
+        finally:
+            release.set()
+            config.TASK_QUEUE_MODE = original_mode
+            self.assertTrue(finished.wait(timeout=2))
+
     def test_inline_unknown_and_unavailable_rq_modes(self):
         original_mode = config.TASK_QUEUE_MODE
         original_url = config.REDIS_URL
@@ -397,6 +437,9 @@ class ProductApiTest(unittest.TestCase):
             f"/api/v1/analysis-jobs/{job['id']}/cancel", headers=headers
         )
         self.assertEqual(cancelled.get_json()['data']['status'], 'cancelled')
+        self.assertEqual(self.client.post(
+            f"/api/v1/analysis-jobs/{job['id']}/cancel", headers=headers
+        ).status_code, 409)
         self.assertEqual(self.client.get(
             '/api/v1/analysis-jobs/not-found'
         ).status_code, 404)
@@ -446,6 +489,12 @@ class ProductApiTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 202, response.get_data(as_text=True))
         job = response.get_json()['data']
+        deadline = time.monotonic() + 10
+        while job['status'] not in {'succeeded', 'failed'} and time.monotonic() < deadline:
+            time.sleep(0.02)
+            job = self.client.get(
+                f"/api/v1/analysis-jobs/{job['id']}"
+            ).get_json()['data']
         self.assertEqual(job['status'], 'succeeded')
         self.assertEqual(job['result']['summary']['sample_count'], 12)
         self.assertIn('available', job['result']['lda'])

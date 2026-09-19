@@ -458,7 +458,7 @@ class ProductStore:
             ).fetchall()
         return [self._analysis_job(row) for row in rows]
 
-    def update_analysis_job(self, job_id, **fields):
+    def update_analysis_job(self, job_id, *, expected_statuses=None, **fields):
         allowed = {
             'status', 'progress', 'result_json', 'error_code', 'error_message',
             'started_at', 'finished_at'
@@ -472,11 +472,22 @@ class ProductStore:
             raise ValueError('invalid analysis job status')
         values['updated_at'] = utc_now()
         assignments = ', '.join(f'{key} = ?' for key in values)
+        expected = tuple(expected_statuses) if expected_statuses is not None else None
+        if expected is not None and not expected:
+            return None
+        where = 'id = ?'
+        parameters = (*values.values(), job_id)
+        if expected is not None:
+            where += f" AND status IN ({', '.join('?' for _ in expected)})"
+            parameters += expected
         with self.connect() as connection:
-            connection.execute(
-                f'UPDATE analysis_jobs SET {assignments} WHERE id = ?',
-                (*values.values(), job_id),
+            cursor = connection.execute(
+                f'UPDATE analysis_jobs SET {assignments} WHERE {where}',
+                parameters,
             )
+            updated = cursor.rowcount > 0
+        if expected is not None and not updated:
+            return None
         return self.get_analysis_job(job_id)
 
     @staticmethod

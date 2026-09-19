@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Hybrid trend forecasting: ARIMA + SIR baselines corrected by an LSTM.
+"""Hybrid trend forecasting: ARIMA and SIR baselines with an LSTM forecast.
 
 设计动机（对应竞赛叙事“物理约束 + 数据驱动”）：
 
 - ARIMA 擅长短期统计外推，但不理解传播动力学；
 - SIR 用 β/γ 拟合出符合传播规律的单峰形状，R₀ 反映扩散强度，作为形状先验；
-- LSTM 在两条基线之上学习残差，用数据驱动修正物理约束的偏差。
+- LSTM 将两条基线作为输入特征预测下一日讨论量，再与 ARIMA 预测加权融合。
 
 损失函数 = MSE(LSTM 输出, 实际值) + SIR_PRIOR_WEIGHT × MSE(LSTM 输出, SIR 基线)。
 
 可信度边界：
-- 训练/验证按时间切分（后 20% 窗口做验证），不做随机打乱，避免时间序列泄漏；
-- 输出置信区间来自验证集残差标准差，样本少时区间偏窄，需要人工复核；
+- 验证段前的历史用于拟合基线、归一化和 LSTM；验证后再用全量历史重训未来模型；
+- 仅在有留出验证段时给出未校准的残差参考带，不声称统计置信度；
 - 混合预测仍是外推与情景模拟的组合，不构成因果预测。
 """
 
@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover - depends on environment
 
 import config
 
-HYBRID_TREND_ALGORITHM_VERSION = 'hybrid_arima_sir_lstm_v3'
+HYBRID_TREND_ALGORITHM_VERSION = 'hybrid_arima_sir_lstm_v4'
 FEATURE_DIM = 5  # [讨论量, 情感均值, 互动量, SIR 基线, ARIMA 基线]
 
 
@@ -40,7 +40,7 @@ def _require_torch():
 
 
 class HybridPredictor:
-    """Residual LSTM on top of ARIMA/SIR baselines with an SIR shape prior.
+    """LSTM forecast using ARIMA/SIR features with an SIR shape prior.
 
     用法：
         predictor = HybridPredictor()
@@ -76,6 +76,9 @@ class HybridPredictor:
         self.R0 = None
         self.blend_weight_lstm = 0.5
         self.validation_residual_std = None
+        self.validation_mae = None
+        self.validation_points = 0
+        self.reference_band_half_width = None
         self._model = None
         self._baseline = None
 
@@ -164,17 +167,63 @@ class HybridPredictor:
         return np.clip(values, 0.0, 1.0)
 
     @staticmethod
-    def _engagement_series(counts, engagement):
+    def _engagement_series(counts, engagement, scale_prefix=None):
         if engagement is None:
             return np.zeros(len(counts))
         values = np.asarray(engagement, dtype=float)
         if len(values) != len(counts) or not np.all(np.isfinite(values)):
             return np.zeros(len(counts))
         values = np.maximum(values, 0.0)
-        peak = float(np.max(values))
+        peak = float(np.max(values[:scale_prefix])) if scale_prefix else float(np.max(values))
         if peak <= 0:
             return np.zeros(len(counts))
         return np.log1p(values) / np.log1p(peak)
+
+    def _feature_tensors(self, observed, sentiment, engagement, baseline, scale_prefix):
+        """Build one-step windows; all fitted scales use only ``scale_prefix``."""
+        y_max = max(float(np.max(observed[:scale_prefix])), 1.0)
+        y_norm = observed / y_max
+        sir_curve = np.concatenate((baseline['sir']['history'], baseline['sir']['future']))
+        arima_curve = np.concatenate((baseline['arima']['history'], baseline['arima']['future']))
+        sir_norm = np.maximum(sir_curve / y_max, 0.0)
+        arima_norm = np.maximum(arima_curve / y_max, 0.0)
+        sent_norm = self._sentiment_series(observed, sentiment)
+        eng_norm = self._engagement_series(observed, engagement, scale_prefix)
+
+        sequences, targets, sir_targets = [], [], []
+        for target in range(self.window, len(observed)):
+            sequences.append([
+                [y_norm[s], sent_norm[s], eng_norm[s], sir_norm[s], arima_norm[s]]
+                for s in range(target - self.window, target)
+            ])
+            targets.append(y_norm[target])
+            sir_targets.append(sir_norm[target])
+        x = torch.tensor(np.asarray(sequences, dtype=float), dtype=torch.float32)
+        y = torch.tensor(np.asarray(targets, dtype=float), dtype=torch.float32).view(-1, 1)
+        sir_y = torch.tensor(np.asarray(sir_targets, dtype=float), dtype=torch.float32).view(-1, 1)
+        return x, y, sir_y, y_max, y_norm, sent_norm, eng_norm
+
+    def _train_lstm(self, x, y, sir_y):
+        torch.manual_seed(self.seed)
+        model = nn.LSTM(
+            input_size=FEATURE_DIM, hidden_size=self.hidden_size,
+            num_layers=1, batch_first=True,
+        )
+        head = nn.Linear(self.hidden_size, 1)
+        optimizer = torch.optim.AdamW(
+            list(model.parameters()) + list(head.parameters()), lr=self.lr
+        )
+        mse = nn.MSELoss()
+        for _ in range(self.epochs):
+            optimizer.zero_grad()
+            output, _ = model(x)
+            prediction = head(output[:, -1, :])
+            data_loss = mse(prediction, y)
+            sir_loss = mse(prediction, sir_y)
+            loss = data_loss + self.sir_prior_weight * sir_loss
+            loss.backward()
+            optimizer.step()
+        return model, head
 
     def fit(self, counts, sentiment=None, engagement=None):
         _require_torch()
@@ -186,90 +235,61 @@ class HybridPredictor:
         if len(observed) < self.window + 3:
             raise ValueError('观测点数量不足以构建滑动窗口')
 
-        steps = self.forecast_days
-        self._baseline = {
-            'sir': self._sir_baseline(observed, steps),
-            'arima': self._arima_baseline(observed, steps),
-        }
-        sir = self._baseline['sir']
-        arima = self._baseline['arima']
-        self.R0 = sir['R0']
-
-        y_max = max(float(np.max(observed)), 1.0)
-        y_norm = observed / y_max
-        sir_norm = np.maximum(sir['history'] / y_max, 0.0)
-        arima_norm = np.maximum(arima['history'] / y_max, 0.0)
-        sent_norm = self._sentiment_series(observed, sentiment)
-        eng_norm = self._engagement_series(observed, engagement)
-        self._y_max = y_max
-        self._y_norm = y_norm
-        self._sent_norm = sent_norm
-        self._eng_norm = eng_norm
-
-        sequences, targets, sir_targets, positions = [], [], [], []
-        for position in range(self.window - 1, len(observed) - 1):
-            window_rows = [
-                [y_norm[s], sent_norm[s], eng_norm[s], sir_norm[s], arima_norm[s]]
-                for s in range(position - self.window + 1, position + 1)
-            ]
-            sequences.append(window_rows)
-            targets.append(y_norm[position + 1])
-            sir_targets.append(sir_norm[position + 1])
-            positions.append(position + 1)
-        x = torch.tensor(np.asarray(sequences, dtype=float), dtype=torch.float32)
-        y = torch.tensor(np.asarray(targets, dtype=float), dtype=torch.float32).view(-1, 1)
-        sir_y = torch.tensor(
-            np.asarray(sir_targets, dtype=float), dtype=torch.float32
-        ).view(-1, 1)
-
-        total = len(sequences)
+        total = len(observed) - self.window
         val_size = max(1, total // 5) if total >= 10 else 0
-        train_end = total - val_size
-        x_train, y_train, sir_train = x[:train_end], y[:train_end], sir_y[:train_end]
-        x_val, y_val = x[train_end:], y[train_end:]
+        train_end = len(observed) - val_size
+        self.validation_points = val_size
+        self.validation_residual_std = None
+        self.validation_mae = None
+        self.reference_band_half_width = None
+        self.blend_weight_lstm = 0.5
 
-        torch.manual_seed(self.seed)
-        np.random.seed(self.seed)
-        self._model = nn.LSTM(
-            input_size=FEATURE_DIM, hidden_size=self.hidden_size,
-            num_layers=1, batch_first=True,
-        )
-        head = nn.Linear(self.hidden_size, 1)
-        self._head = head
-        optimizer = torch.optim.AdamW(
-            list(self._model.parameters()) + list(head.parameters()), lr=self.lr
-        )
-        mse = nn.MSELoss()
-        for _ in range(self.epochs):
-            optimizer.zero_grad()
-            output, _ = self._model(x_train)
-            prediction = head(output[:, -1, :])
-            data_loss = mse(prediction, y_train)
-            sir_loss = mse(prediction, sir_train)
-            loss = data_loss + self.sir_prior_weight * sir_loss
-            loss.backward()
-            optimizer.step()
+        if val_size:
+            # The validation baseline, normalization and LSTM see only the
+            # prefix. Holdout targets are never used for fitting or scaling.
+            prefix = observed[:train_end]
+            validation_baseline = {
+                'sir': self._sir_baseline(prefix, val_size),
+                'arima': self._arima_baseline(prefix, val_size),
+            }
+            x, y, sir_y, y_max, _, _, _ = self._feature_tensors(
+                observed, sentiment, engagement, validation_baseline, train_end
+            )
+            train_windows = train_end - self.window
+            model, head = self._train_lstm(
+                x[:train_windows], y[:train_windows], sir_y[:train_windows]
+            )
+            with torch.no_grad():
+                output, _ = model(x[train_windows:])
+                lstm_values = head(output[:, -1, :]).view(-1).numpy() * y_max
+            actual = observed[train_end:]
+            arima_values = np.asarray(validation_baseline['arima']['future'], dtype=float)
+            lstm_error = float(np.mean(np.abs(lstm_values - actual)))
+            arima_error = float(np.mean(np.abs(arima_values - actual)))
+            total_error = lstm_error + arima_error
+            if total_error > 0:
+                self.blend_weight_lstm = min(0.8, max(0.2, arima_error / total_error))
+            blended = np.clip(
+                self.blend_weight_lstm * lstm_values
+                + (1 - self.blend_weight_lstm) * arima_values,
+                0.0, 1.5 * y_max,
+            )
+            residuals = blended - actual
+            self.validation_residual_std = float(np.std(residuals))
+            self.validation_mae = float(np.mean(np.abs(residuals)))
+            self.reference_band_half_width = float(np.max(np.abs(residuals)))
 
-        with torch.no_grad():
-            if val_size:
-                output, _ = self._model(x_val)
-                val_pred = head(output[:, -1, :]).view(-1)
-                residuals = (val_pred - y_val.view(-1)).numpy() * y_max
-                self.validation_residual_std = float(np.std(residuals)) if len(residuals) > 1 else float(np.abs(residuals).mean() if len(residuals) else 0.0)
-                val_error = float(np.mean(np.abs(residuals)))
-            else:
-                output, _ = self._model(x_train)
-                train_pred = head(output[:, -1, :]).view(-1)
-                residuals = (train_pred - y_train.view(-1)).numpy() * y_max
-                self.validation_residual_std = float(np.std(residuals))
-                val_error = float(np.mean(np.abs(residuals)))
-            arima_val_error = float(np.mean(np.abs(
-                (arima_norm[np.asarray(positions[train_end:])] - y_val.view(-1).numpy())
-                * y_max
-            ))) if val_size else val_error
-        total_error = val_error + arima_val_error
-        if total_error > 0:
-            self.blend_weight_lstm = min(0.8, max(0.2, arima_val_error / total_error))
+        # Future forecasts may use every observation; train a fresh model and
+        # baselines rather than reusing the holdout-only validation fit.
+        self._baseline = {
+            'sir': self._sir_baseline(observed, self.forecast_days),
+            'arima': self._arima_baseline(observed, self.forecast_days),
+        }
+        self.R0 = self._baseline['sir']['R0']
+        x, y, sir_y, self._y_max, self._y_norm, self._sent_norm, self._eng_norm = (
+            self._feature_tensors(observed, sentiment, engagement, self._baseline, len(observed))
+        )
+        self._model, self._head = self._train_lstm(x, y, sir_y)
         return self
 
     # ---------- 预测 ----------
@@ -281,6 +301,8 @@ class HybridPredictor:
         steps = self.forecast_days if steps is None else int(steps)
         if steps < 1:
             raise ValueError('steps 必须大于等于 1')
+        if steps > self.forecast_days:
+            raise ValueError('steps 不得超过拟合时配置的 forecast_days')
         baseline = self._baseline
         sir = baseline['sir']
         arima = baseline['arima']
@@ -321,17 +343,28 @@ class HybridPredictor:
                 eng_ext.append(eng_ext[-1])
 
         forecast = [round(value * y_max, 2) for value in forecast_norm]
-        sigma = float(self.validation_residual_std or 0.0)
-        lower = [round(max(value - 1.96 * sigma, 0.0), 2) for value in forecast]
-        upper = [round(value + 1.96 * sigma, 2) for value in forecast]
+        if self.reference_band_half_width is None:
+            lower = upper = None
+        else:
+            width = self.reference_band_half_width
+            lower = [round(max(value - width, 0.0), 2) for value in forecast]
+            upper = [round(value + width, 2) for value in forecast]
         return {
             'algorithm_version': HYBRID_TREND_ALGORITHM_VERSION,
             'steps': steps,
             'forecast': forecast,
             'lower_bound': lower,
             'upper_bound': upper,
-            'confidence_level': '95%',
-            'validation_residual_std': round(sigma, 3),
+            'confidence_level': None,
+            'interval_type': 'uncalibrated_holdout_error_band' if lower is not None else None,
+            'validation_points': self.validation_points,
+            'validation_mae': (
+                round(self.validation_mae, 3) if self.validation_mae is not None else None
+            ),
+            'validation_residual_std': (
+                round(self.validation_residual_std, 3)
+                if self.validation_residual_std is not None else None
+            ),
             'blend_weight_lstm': round(self.blend_weight_lstm, 3),
             'sir_prior_weight': self.sir_prior_weight,
             'R0': self.R0,
@@ -360,6 +393,8 @@ class HybridPredictor:
             },
             'claim_scope': (
                 '混合预测是统计外推与传播情景的组合，不证明因果关系；'
-                '置信区间来自验证残差，样本不足时需人工研判。'
+                '留出段是逐日单步预测，使用前一天已知的真实观测；'
+                '多步未来预测的上下界仅为留出段最大绝对误差形成的未校准参考带，'
+                '不具有置信区间或覆盖率保证；缺少留出段时不提供上下界。'
             ),
         }

@@ -238,11 +238,11 @@
                     <div id="analytics-sources" class="analytics-sources"></div>
                 </article>
                 <article class="panel span-12 advanced-panel analytics-model-panel">
-                    <div class="panel-title"><div><p class="kicker">ADVANCED MODELS</p><h2>高级实验模型</h2><p>LDA、ARIMA 与 SIR 只使用当前监测项目的匹配信号，结果不作为事实判断。</p></div></div>
+                    <div class="panel-title"><div><p class="kicker">ADVANCED MODELS</p><h2>高级实验模型</h2><p>LDA、ARIMA、SIR 与混合预测只使用当前监测项目的匹配信号；预测结果用于研判，不作为事实判断。</p></div></div>
                     <div id="analytics-readiness" class="readiness-grid"></div>
                     <form id="analysis-form" class="filter-form advanced-form analytics-model-form">
                         <input id="analysis-monitor-id" name="monitor_id" type="hidden">
-                        <label>分析类型<select name="type"><option value="summary">摘要与词频</option><option value="full">全部实验模型</option><option value="lda">LDA 主题</option><option value="arima">ARIMA</option><option value="sir">SIR 情景</option></select></label>
+                        <label>分析类型<select name="type"><option value="summary">摘要与词频</option><option value="full">全部实验模型（含混合预测）</option><option value="lda">LDA 主题</option><option value="arima">ARIMA</option><option value="sir">SIR 情景</option><option value="hybrid">ARIMA/SIR/LSTM 混合预测</option></select></label>
                         <label>开始日期<input name="start_date" type="date"></label>
                         <label>结束日期<input name="end_date" type="date"></label>
                         <button class="secondary" type="submit">运行当前项目分析</button>

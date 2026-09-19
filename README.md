@@ -46,9 +46,9 @@
 
 | 模块 | 基线（可回退） | 新算法 | 版本号 | 启用方式 |
 |---|---|---|---|---|
-| 情感分析 | `transparent_lexicon_v2` 透明词典 | 微调中文 BERT/RoBERTa（默认 `hfl/chinese-roberta-wwm-ext`） | `bert_finetuned_v3` | `SENTIMENT_ENGINE=auto` + 训练检查点 |
+| 情感分析 | `transparent_lexicon_v2` 透明词典 | 微调中文 BERT/RoBERTa（默认 `google-bert/bert-base-chinese`） | `bert_finetuned_v3` | `SENTIMENT_ENGINE=auto` + 训练检查点 |
 | 事件聚合 | `char_ngram_tfidf_v2` 字符 n-gram | BERTopic（多语言句向量 + UMAP + HDBSCAN） | `bertopic_v3` | `CLUSTERING_ENGINE=auto` |
-| 趋势预测 | ARIMA / SIR 独立基线 | 混合预测：ARIMA/SIR 基线 + LSTM 残差 + SIR 形状先验 | `hybrid_arima_sir_lstm_v3` | 分析类型 `hybrid`（`full` 附带） |
+| 趋势预测 | ARIMA / SIR 独立基线 | 混合预测：ARIMA/SIR 基线 + LSTM 讨论量预测 + 加权融合与 SIR 形状先验 | `hybrid_arima_sir_lstm_v4` | 分析类型 `hybrid`（`full` 附带） |
 
 - **情感分析**：`score_sentiment()` 按来源标签 > BERT > 词典的顺序执行。BERT 结果保留词典交叉核对证据（`evidence.lexicon_cross_check`）；没有微调检查点或依赖缺失时自动回退词典，不会伪造模型结果。微调训练：
 
@@ -58,7 +58,7 @@
 
   数据约定 0=负面、1=正面，支持 JSON/JSONL/CSV；检查点写入 `models/saved/bert_sentiment` 并附带训练元数据。
 - **事件聚合**：`CLUSTERING_ENGINE=auto` 时信号数 ≥ `BERTOPIC_MIN_DOCS` 才启用 BERTopic；HDBSCAN 噪声点保持为独立事件，依赖缺失或拟合失败自动回退 n-gram 基线。事件 `metrics.clustering_engine` 记录引擎、主题数与自动生成的中文主题词。
-- **混合预测**：分析任务新增 `hybrid` 类型，`full` 分析也会附带。LSTM 在 ARIMA/SIR 双基线上学习残差，损失函数加入 SIR 形状约束（`HYBRID_SIR_PRIOR_WEIGHT`）；训练/验证按时间切分避免时序泄漏；置信区间来自验证集残差。
+- **混合预测**：分析任务新增 `hybrid` 类型，`full` 分析也会附带。LSTM 利用讨论量、情感、互动量和 ARIMA/SIR 基线预测下一日讨论量，再与 ARIMA 预测加权融合；损失函数加入 SIR 形状约束（`HYBRID_SIR_PRIOR_WEIGHT`）。验证阶段的基线与缩放只用训练前缀拟合，正式预测再用全部历史数据训练。输出的上下界仅是未校准的残差参考范围，不是“95% 置信区间”。无独立验证窗口时不提供该范围。
 
 依赖安装：`pip install -r requirements-ml.txt`（PyTorch 已在 requirements.txt 中；首次运行 BERTopic 会下载多语言句向量模型）。核心监测流程仍不依赖这些可选组件，CI 只测试基线路径。
 
@@ -94,6 +94,8 @@ ADMIN_PASSWORD=你自己的强密码，至少10位
 TASK_QUEUE_MODE=inline
 COLLECTOR_LICENSE_ACCEPTED=false
 ```
+
+在本地 `inline` 模式下，`full` 和 `hybrid` 分析会进入单进程后台线程，提交后可继续使用页面，结果由页面定时刷新。该线程不具备断电/重启后的任务恢复能力；正式部署请使用 Redis/RQ（`TASK_QUEUE_MODE=rq`）。
 
 启动：
 
@@ -285,7 +287,7 @@ python -m coverage run --source=crawler,services,storage,web -m unittest discove
 python -m coverage report -m
 ```
 
-本机 Conda `cv` 环境的当前结果是 **59/59 通过**，包括原有 API 回归、V2 监测闭环、可视化聚合、54 条固定演示数据的幂等验证，以及 suanfa 分支新增的算法升级回归（BERT 情感开关与回退、BERTopic 语义聚类确定性、混合预测区间）。CI 覆盖率口径的当前结果为 **81%（1013/1250）**。V2 原核心模块的历史记录覆盖率为 **82%（886/1075）**；本次新增的合成案例与可视化聚合服务为 **93%（183/196）**。复测记录见 [`docs/evidence/competition-data-visualization.md`](docs/evidence/competition-data-visualization.md)。已启用的 CI 工作流位于 `.github/workflows/ci.yml`，只使用固定测试夹具和模拟采集适配路径，不连接真实社交平台。真实微博冒烟测试必须由用户扫码授权后手动执行。
+2026-09-19 在本机 Conda `cv` 环境复测 **67/67 通过**，覆盖原有 API、V2 监测、可视化及算法升级回归，并新增连续日补零、验证隔离、本地后台执行和取消状态保护测试。**本次未重新测量覆盖率**；此前 CI 覆盖率记录为 81%（1013/1250），不应当作当前分支覆盖率。此前复测记录见 [`docs/evidence/competition-data-visualization.md`](docs/evidence/competition-data-visualization.md)。CI 工作流位于 `.github/workflows/ci.yml`，使用固定测试夹具和模拟采集适配路径，不连接真实社交平台；真实微博冒烟测试须由用户授权后手动执行。
 
 ## 备份、恢复与故障排查
 

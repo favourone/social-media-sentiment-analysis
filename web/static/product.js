@@ -769,15 +769,57 @@ function renderAnalyticsReadiness(readiness) {
         ['lda', 'LDA 主题', `${fmtNumber(readiness.documents)} 篇有效文本`],
         ['arima', 'ARIMA 趋势', `${fmtNumber(readiness.observed_days)} 个观测日`],
         ['sir', 'SIR 情景', `${fmtNumber(readiness.observed_days)} 个观测日`],
+        ['hybrid', 'ARIMA/SIR/LSTM 混合预测', `${fmtNumber(readiness.observed_days)} 个有信号日期 · ${fmtNumber(readiness.calendar_days)} 个自然日跨度`, '两项均至少 10'],
     ];
-    host.innerHTML = definitions.map(([key, label, current]) => {
+    host.innerHTML = definitions.map(([key, label, current, minimumLabel]) => {
         const item = readiness[key] || {};
         return `<article class="readiness-card ${item.available ? 'ready' : 'blocked'}">
-            <div><strong>${escapeHTML(label)}</strong>${statusBadge(item.available ? 'succeeded' : 'paused')}</div>
-            <p>${escapeHTML(current)} · 最低要求 ${escapeHTML(item.minimum)}</p>
+            <div><strong>${escapeHTML(label)}</strong><span class="status ${item.available ? 'succeeded' : 'paused'}">${item.available ? '数据满足' : '数据不足'}</span></div>
+            <p>${escapeHTML(current)} · ${escapeHTML(minimumLabel || `最低要求 ${item.minimum}`)}</p>
             <small>${escapeHTML(item.note || '')}</small>
         </article>`;
     }).join('');
+}
+
+function forecastDayLabel(lastObservedDay, offset) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(lastObservedDay || ''))) return `第 ${offset} 期`;
+    const day = new Date(`${lastObservedDay}T00:00:00Z`);
+    if (Number.isNaN(day.getTime())) return `第 ${offset} 期`;
+    day.setUTCDate(day.getUTCDate() + offset);
+    return day.toISOString().slice(0, 10);
+}
+
+function hybridResultHTML(item) {
+    const label = 'ARIMA/SIR/LSTM 混合预测';
+    if (item.available === false) {
+        return `<article class="blocked"><strong>${label}</strong><p>${escapeHTML(item.reason || '当前数据或依赖不满足运行条件')}</p></article>`;
+    }
+    const prediction = item.forecast || {};
+    const values = Array.isArray(prediction.forecast) ? prediction.forecast : [];
+    if (!values.length) {
+        return `<article class="blocked"><strong>${label}</strong><p>未返回可展示的预测期。</p></article>`;
+    }
+    const boundsLow = Array.isArray(prediction.lower_bound) ? prediction.lower_bound : [];
+    const boundsHigh = Array.isArray(prediction.upper_bound) ? prediction.upper_bound : [];
+    const validBound = (value) => value !== null && value !== undefined && Number.isFinite(Number(value));
+    const hasBounds = boundsLow.length === values.length && boundsHigh.length === values.length
+        && boundsLow.every(validBound) && boundsHigh.every(validBound);
+    const lastObservedDay = (item.dates || []).at(-1);
+    const displayCount = (value) => Number.isFinite(Number(value)) && value !== null
+        ? `${fmtNumber(value)} 条` : '—';
+    const rows = values.map((value, index) => `<tr>
+        <td>${escapeHTML(forecastDayLabel(lastObservedDay, index + 1))}</td>
+        <td>${escapeHTML(displayCount(value))}</td>
+        <td>${hasBounds ? `${escapeHTML(displayCount(boundsLow[index]))}～${escapeHTML(displayCount(boundsHigh[index]))}` : '—'}</td>
+    </tr>`).join('');
+    const periodStart = forecastDayLabel(lastObservedDay, 1);
+    const periodEnd = forecastDayLabel(lastObservedDay, values.length);
+    const scope = hasBounds ? (prediction.claim_scope || item.claim_scope) : item.claim_scope;
+    return `<article style="grid-column:1 / -1"><strong>${label}</strong>
+        <p>${fmtNumber(item.observed_points)} 个日点 · 预测 ${values.length} 期（${escapeHTML(periodStart)} 至 ${escapeHTML(periodEnd)}）</p>
+        <div class="table-wrap"><table aria-label="混合预测逐期结果"><thead><tr><th>预测日期</th><th>讨论量</th><th>${hasBounds ? '未校准参考范围' : '参考范围'}</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <small>${hasBounds ? '参考范围由留出验证误差估算，尚未校准覆盖率，不是 95% 置信区间。' : '留出验证不足，未提供参考范围。'}${escapeHTML(scope || '')}</small>
+    </article>`;
 }
 
 function analysisResultHTML(job) {
@@ -803,6 +845,7 @@ function analysisResultHTML(job) {
                     : `峰值日 ${item.peak_day ?? '未提供'}，拟合 NRMSE ${item.fit_nrmse ?? '未提供'}`;
         sections.push(`<article class="${item.available === false ? 'blocked' : ''}"><strong>${escapeHTML(label)}</strong><p>${escapeHTML(note || '分析已完成')}</p><small>${escapeHTML(item.claim_scope || '实验模型结果必须结合原始证据人工解释。')}</small></article>`);
     }
+    if (result.hybrid) sections.push(hybridResultHTML(result.hybrid));
     return `<div class="analysis-result-head"><span>最近任务</span>${statusBadge(job.status)}</div><div class="analysis-result-grid">${sections.join('')}</div>`;
 }
 

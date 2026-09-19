@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
@@ -38,12 +39,7 @@ from services.intelligence import (
     cluster_signals,
 )
 
-try:
-    import bertopic  # noqa: F401
-
-    BERTOPIC_AVAILABLE = True
-except ImportError:
-    BERTOPIC_AVAILABLE = False
+BERTOPIC_AVAILABLE = importlib.util.find_spec('bertopic') is not None
 
 try:
     from models.hybrid_predictor import (
@@ -53,7 +49,7 @@ try:
     )
 except ImportError:
     HAS_TORCH = False
-    HYBRID_TREND_ALGORITHM_VERSION = 'hybrid_arima_sir_lstm_v3'
+    HYBRID_TREND_ALGORITHM_VERSION = 'hybrid_arima_sir_lstm_v4'
 
 from services.tasks import _hybrid_analysis
 
@@ -286,7 +282,7 @@ class HybridPredictorTest(unittest.TestCase):
         counts = self._series()
         sentiment = [0.4 if value > 30 else 0.6 for value in counts]
         engagement = [value * 3 for value in counts]
-        predictor = HybridPredictor(epochs=150)
+        predictor = HybridPredictor(epochs=5)
         predictor.fit(counts, sentiment=sentiment, engagement=engagement)
         forecast = predictor.predict(steps=7)
         self.assertEqual(forecast['algorithm_version'], HYBRID_TREND_ALGORITHM_VERSION)
@@ -315,7 +311,8 @@ class HybridPredictorTest(unittest.TestCase):
                 'engagement': {'likes': int(value)},
                 'text': f'第 {index} 天的校园观察记录',
             })
-        result = _hybrid_analysis(posts)
+        with patch.object(config, 'HYBRID_EPOCHS', 5):
+            result = _hybrid_analysis(posts)
         self.assertTrue(result['available'])
         self.assertEqual(result['algorithm_version'], HYBRID_TREND_ALGORITHM_VERSION)
 

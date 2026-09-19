@@ -111,9 +111,9 @@ def _filters(payload):
     return {'topic': topic, 'start_date': start_date, 'end_date': end_date}
 
 
-def _dispatch(function_path, identifier):
+def _dispatch(function_path, identifier, *, background=False):
     try:
-        return dispatch(function_path, identifier)
+        return dispatch(function_path, identifier, background=background)
     except QueueUnavailable:
         return None
     except Exception:
@@ -399,12 +399,15 @@ def create_analysis_job():
         filters['topic'] = None
     store = get_product_store()
     job = store.create_analysis_job(analysis_type, filters)
-    if _dispatch('services.tasks.run_analysis_job', job['id']) is None:
+    if _dispatch(
+        'services.tasks.run_analysis_job', job['id'],
+        background=analysis_type in {'full', 'hybrid'},
+    ) is None:
         store.update_analysis_job(
             job['id'], status='failed', progress=100, error_code='queue_unavailable',
-            error_message='Redis/RQ 不可用', finished_at=utc_now()
+            error_message='任务执行服务暂不可用', finished_at=utc_now()
         )
-        return error('queue_unavailable', '任务队列不可用', 503)
+        return error('queue_unavailable', '任务执行服务暂不可用', 503)
     return success(store.get_analysis_job(job['id']), 202)
 
 
@@ -425,9 +428,13 @@ def cancel_analysis_job(job_id):
         return error('not_found', '分析任务不存在', 404)
     if job['status'] not in {'pending', 'running', 'paused'}:
         return error('invalid_state', '当前任务状态不能取消', 409)
-    return success(store.update_analysis_job(
-        job_id, status='cancelled', finished_at=utc_now()
-    ))
+    cancelled = store.update_analysis_job(
+        job_id, expected_statuses={'pending', 'running', 'paused'},
+        status='cancelled', finished_at=utc_now(),
+    )
+    if cancelled is None:
+        return error('invalid_state', '当前任务状态不能取消', 409)
+    return success(cancelled)
 
 
 @product.get('/api/v1/alerts')

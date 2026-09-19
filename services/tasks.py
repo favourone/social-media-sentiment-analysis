@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter, defaultdict
+from datetime import date, timedelta
 
 from crawler.adapters import CollectorError, CollectorPaused, get_collector
 from services.reporting import generate_csv, generate_pdf, report_path
@@ -211,34 +212,47 @@ def _sir_analysis(posts):
 
 
 def _hybrid_analysis(posts):
-    """ARIMA/SIR 基线 + LSTM 残差的混合趋势预测（按日聚合讨论量）。"""
-    from collections import defaultdict
-
+    """ARIMA/SIR 特征与 LSTM 预测融合（按连续日历日聚合讨论量）。"""
     daily_counts = Counter()
     daily_sentiment = defaultdict(list)
     daily_engagement = Counter()
     for post in posts:
-        day = (post.get('published_at') or '')[:10]
-        if not day:
+        day = (post.get('published_at') or post.get('fetched_at') or '')[:10]
+        try:
+            parsed_day = date.fromisoformat(day)
+        except ValueError:
             continue
+        day = parsed_day.isoformat()
         daily_counts[day] += 1
         daily_sentiment[day].append(1 if post.get('sentiment') == 1 else 0)
         daily_engagement[day] += sum(
             int(value or 0)
             for value in (post.get('engagement') or {}).values()
         )
-    days = sorted(daily_counts)
+    if daily_counts:
+        start = date.fromisoformat(min(daily_counts))
+        end = date.fromisoformat(max(daily_counts))
+        days = [
+            (start + timedelta(days=offset)).isoformat()
+            for offset in range((end - start).days + 1)
+        ]
+    else:
+        days = []
     counts = [daily_counts[day] for day in days]
     sentiment = [
-        sum(daily_sentiment[day]) / max(len(daily_sentiment[day]), 1)
+        sum(daily_sentiment[day]) / len(daily_sentiment[day])
+        if daily_sentiment[day] else 0.5
         for day in days
     ]
     engagement = [daily_engagement[day] for day in days]
-    result = {'observed_points': len(counts), 'dates': days, 'counts': counts}
-    if len(counts) < 10:
+    result = {
+        'observed_points': len(counts), 'active_days': len(daily_counts),
+        'dates': days, 'counts': counts,
+    }
+    if len(daily_counts) < 10:
         result.update({
             'available': False,
-            'reason': '混合预测至少需要 10 个日观测点',
+            'reason': '混合预测至少需要 10 个有实际样本的日期',
         })
         return result
     try:
@@ -274,15 +288,15 @@ def _hybrid_analysis(posts):
 
 
 def run_analysis_job(job_id):
-    store = get_product_store()
-    job = store.get_analysis_job(job_id)
-    if not _still_active(job):
-        return
-    store.update_analysis_job(
-        job_id, status='running', progress=5, started_at=utc_now(),
-        error_code=None, error_message=None
-    )
+    store = None
     try:
+        store = get_product_store()
+        job = store.update_analysis_job(
+            job_id, expected_statuses={'pending'}, status='running', progress=5,
+            started_at=utc_now(), error_code=None, error_message=None,
+        )
+        if job is None:
+            return
         params = job.get('params', {})
         monitor_id = params.get('monitor_id')
         if monitor_id:
@@ -326,39 +340,48 @@ def run_analysis_job(job_id):
             )
         if not posts:
             store.update_analysis_job(
-                job_id, status='failed', progress=100,
+                job_id, expected_statuses={'running'}, status='failed', progress=100,
                 error_code='insufficient_data', error_message='当前范围没有可分析的采集数据',
                 finished_at=utc_now()
             )
             return
         analysis_type = job['analysis_type']
         result = {'summary': _summary_analysis(posts)}
-        store.update_analysis_job(job_id, progress=45)
+        if store.update_analysis_job(job_id, expected_statuses={'running'}, progress=45) is None:
+            return
         if analysis_type in {'full', 'lda'}:
             result['lda'] = _lda_analysis(posts)
-        store.update_analysis_job(job_id, progress=70)
+        if store.update_analysis_job(job_id, expected_statuses={'running'}, progress=70) is None:
+            return
         if analysis_type in {'full', 'arima'}:
             result['arima'] = _time_series_analysis(posts)
         if analysis_type in {'full', 'sir'}:
             result['sir'] = _sir_analysis(posts)
         if analysis_type in {'full', 'hybrid'}:
-            store.update_analysis_job(job_id, progress=85)
+            if store.update_analysis_job(job_id, expected_statuses={'running'}, progress=85) is None:
+                return
             result['hybrid'] = _hybrid_analysis(posts)
         if not _still_active(store.get_analysis_job(job_id)):
             return
         if not monitor_id:
             _refresh_alerts(store, posts)
         store.update_analysis_job(
-            job_id, status='succeeded', progress=100, result_json=result,
+            job_id, expected_statuses={'running'}, status='succeeded', progress=100,
+            result_json=result,
             finished_at=utc_now()
         )
     except Exception:
         LOGGER.exception('Unhandled analysis task failure: %s', job_id)
-        store.update_analysis_job(
-            job_id, status='failed', progress=100,
-            error_code='analysis_failed', error_message='分析任务执行失败，请查看服务日志',
-            finished_at=utc_now()
-        )
+        if store is not None:
+            try:
+                store.update_analysis_job(
+                    job_id, expected_statuses={'running'}, status='failed',
+                    progress=100, error_code='analysis_failed',
+                    error_message='分析任务执行失败，请查看服务日志',
+                    finished_at=utc_now(),
+                )
+            except Exception:
+                LOGGER.exception('Could not mark failed analysis task: %s', job_id)
         raise
 
 

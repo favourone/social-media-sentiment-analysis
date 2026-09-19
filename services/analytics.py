@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import date
 
 from processing.text_processor import TextProcessor
 from services.visualization import build_visual_story
@@ -39,7 +40,14 @@ def build_monitor_analytics(
         if item.get('published_at') or item.get('fetched_at')
     )
     documents = sum(bool(str(item.get('text') or '').strip()) for item in signals)
-    observed_days = len([day for day in dated_days if day])
+    valid_days = []
+    for day in dated_days:
+        try:
+            valid_days.append(date.fromisoformat(day))
+        except ValueError:
+            continue
+    observed_days = len(set(valid_days))
+    calendar_days = (max(valid_days) - min(valid_days)).days + 1 if valid_days else 0
     return {
         'monitor': story['monitor'],
         'provenance': story['provenance'],
@@ -54,6 +62,7 @@ def build_monitor_analytics(
         'readiness': {
             'documents': documents,
             'observed_days': observed_days,
+            'calendar_days': calendar_days,
             'lda': {
                 'available': documents >= 10,
                 'minimum': 10,
@@ -69,10 +78,15 @@ def build_monitor_analytics(
                 'minimum': 6,
                 'note': '至少需要 6 个不同日期的观测点。',
             },
+            'hybrid': {
+                'available': observed_days >= 10 and calendar_days >= 10,
+                'minimum': 10,
+                'note': '至少 10 个有真实信号的日期，且首末日期跨度至少 10 天（中间零信号日补零）；日期筛选后会重新判断，还需 PyTorch。',
+            },
         },
         'definitions': {
             **story['definitions'],
             'word_frequency': '仅统计当前监测项目样本文本中的分词频次，不代表全校总体关注度。',
-            'model_scope': 'LDA、ARIMA 与 SIR 只使用当前监测项目的匹配信号；结果仍需人工核验。',
+            'model_scope': 'LDA、ARIMA、SIR 与混合预测只使用当前监测项目的匹配信号；结果仍需人工核验。',
         },
     }
