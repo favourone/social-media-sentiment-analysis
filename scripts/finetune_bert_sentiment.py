@@ -6,7 +6,6 @@
     python scripts/finetune_bert_sentiment.py \
         --train data/sentiment/train.jsonl \
         --valid data/sentiment/valid.jsonl \
-        --model-name hfl/chinese-roberta-wwm-ext \
         --epochs 4
 
 数据格式：JSONL / JSON / CSV 每行一条记录，至少包含：
@@ -36,11 +35,13 @@ sys.path.insert(0, str(BASE_DIR))
 import config  # noqa: E402
 from crawler.adapters import load_records  # noqa: E402
 
-TEXT_KEYS = ('text', 'content', 'desc')
+TEXT_KEYS = ('text', 'content', 'desc', 'review')
 LABEL_KEYS = ('label', 'sentiment')
 POSITIVE_TEXTS = {'1', 'positive', 'pos', '正面', '积极'}
 NEGATIVE_TEXTS = {'0', 'negative', 'neg', '负面', '消极'}
-DEFAULT_MODEL = 'hfl/chinese-roberta-wwm-ext'
+# torch < 2.6 时 transformers 拒绝加载 pytorch_model.bin（CVE-2025-32434），
+# 因此默认基座必须是提供 model.safetensors 的仓库。
+DEFAULT_MODEL = 'google-bert/bert-base-chinese'
 
 
 def parse_args():
@@ -59,6 +60,8 @@ def parse_args():
     parser.add_argument('--seed', type=int, default=config.RANDOM_SEED)
     parser.add_argument('--valid-ratio', type=float, default=0.1,
                         help='未提供验证集时从训练集切分的比例')
+    parser.add_argument('--max-samples', type=int, default=0,
+                        help='大于 0 时按比例截取训练样本，用于快速试跑')
     return parser.parse_args()
 
 
@@ -67,7 +70,7 @@ def extract_example(record):
     for key in TEXT_KEYS:
         value = str(record.get(key) or '').strip()
         if value:
-            text = value
+            text = value.replace('\ufeff', '').strip()
             break
     raw_label = None
     for key in LABEL_KEYS:
@@ -163,6 +166,10 @@ def main():
             train_examples, args.valid_ratio, args.seed
         )
         valid_skipped = 0
+    if args.max_samples and 0 < args.max_samples < len(train_examples):
+        # 固定种子截取，保持类别混合；用于快速试跑，正式训练不建议使用。
+        random.Random(args.seed).shuffle(train_examples)
+        train_examples = train_examples[: args.max_samples]
     if len(train_examples) < 20 or not valid_examples:
         print(
             f'数据不足：训练 {len(train_examples)} 条，验证 {len(valid_examples)} 条；'
