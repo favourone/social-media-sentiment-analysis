@@ -265,8 +265,8 @@ class CompetitionDemoApiTest(unittest.TestCase):
         workspace = self.client.get('/workspace')
         self.assertEqual(workspace.status_code, 200)
         workspace_html = workspace.get_data(as_text=True)
-        self.assertIn('校园舆情雷达', workspace_html)
-        self.assertIn('校园安全与民生服务', workspace_html)
+        self.assertIn('语义雷达', workspace_html)
+        self.assertIn('基于微调中文 BERT 情感分析与 BERTopic 语义聚类的校园舆情态势研判平台', workspace_html)
         self.assertIn('分析实验室', workspace_html)
         self.assertNotIn('让公共事件的', workspace_html)
         invalid = self.client.get(

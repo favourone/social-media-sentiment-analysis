@@ -65,6 +65,14 @@
     font-size: 15px;
     line-height: 1.85;
 }
+.hero-copy > .hero-positioning {
+    margin-top: 14px;
+    color: #e2f8f5;
+    font-size: clamp(16px, 1.7vw, 21px);
+    font-weight: 700;
+    line-height: 1.55;
+}
+.hero-copy > .hero-positioning + p { margin-top: 18px; }
 .competition-hero .hero-actions { margin-top: 30px; }
 .competition-hero .primary { color: #062333; background: #fff; }
 .competition-hero .secondary { color: #d8f7f3; background: rgba(124, 233, 223, .14); border: 1px solid rgba(124, 233, 223, .25); }

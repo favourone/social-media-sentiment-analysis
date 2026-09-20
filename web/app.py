@@ -176,7 +176,7 @@ def filter_comments(comments, allowed_post_ids, start_date=None, end_date=None):
 
 @app.route('/')
 def index():
-    """统一进入校园舆情雷达工作台。"""
+    """统一进入语义雷达工作台。"""
     return redirect(url_for('product.workspace'))
 
 
@@ -633,7 +633,7 @@ def api_topics():
 def run_web():
     """启动 Web 应用"""
     print("=" * 60)
-    print("  🌐 校园舆情雷达启动中...")
+    print("  🌐 语义雷达启动中...")
     print(f"  访问地址：http://localhost:{config.WEB_PORT}")
     print("=" * 60)
 
